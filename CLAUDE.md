@@ -61,20 +61,16 @@ Wraps the per-PR loop. See ADR 0007.
 
 ## Per-PR loop
 
-**Lightweight (default — ~80% of PRs):**
-
 1. Pick `ready-for-agent` sub-issue. Branch `N-slug` from `master`.
-2. Implement *with tests in the same commit*.
+2. Implement via `/tdd` — tracer-bullet red-green-refactor against the public surface declared in the agent brief. Tests and code land in the same commit. Test the real `Bus` / `Cpu` / `Machine` (rule 11). If the first failing test forces a contract decision the PRD did not make, stop and sharpen the PRD before continuing — that is the ambiguity signal, not a cue to keep coding.
 3. `/simplify` on the diff.
 4. `/commit`.
 5. `/commit-push-pr`.
-6. `/review` (or `feature-dev:code-reviewer` agent) for cold-read review.
+6. `/review` (or the `feature-dev:code-reviewer` agent) for cold-read review.
 7. CI green on `ubuntu-latest` ∩ `macos-latest`.
 8. Merge.
 
-**Heavyweight gate (architectural-shape sub-issues — M0, M3, M6, maybe M5; cross-module refactors):**
-
-Run `/feature-dev` at the start. Pipeline: `code-explorer` → clarifying questions → 2–3 parallel `code-architect` agents (minimal-change / clean-arch / pragmatic-balance) → user picks → user approves → 3 parallel `code-reviewer` agents at end. Optional `/ultrareview` final pass.
+`/feature-dev:feature-dev` is no longer used (ADR 0008). Shape decisions belong in PRDs and ADRs; implementation always uses `/tdd`. Cross-module refactors that need shape exploration go through `/request-refactor-plan` and ship as their own PR.
 
 ## Other skills, when to use
 
