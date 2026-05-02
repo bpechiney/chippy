@@ -1,0 +1,3 @@
+# No wall-clock pacing in core; no OS randomness in core
+
+`chippy_core` never calls `std.time.Timer` or any OS-randomness function (`std.crypto.random` etc.). The frontend owns wall-clock pacing — it calls `runFrame()` in a frame-budgeted loop driven by `std.time.Timer` — and seeds the core's PRNG from `std.crypto.random` once at startup, logging the seed to stderr so a session can be replayed via `--seed`. The core is therefore a pure function of `(seed, ROM, cycles-run)`: more frontend complexity in exchange for fully deterministic headless tests, save-state-able runs that roundtrip exactly, and bug replay across machines.
