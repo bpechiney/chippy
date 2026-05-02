@@ -14,7 +14,7 @@ Chippy is a vanilla COSMAC VIP CHIP-8 emulator in Zig 0.16. It is also a deliber
 
 - **Domain language:** `CONTEXT.md` (root). Update when introducing a new domain term.
 - **Decisions:** `docs/adr/NNNN-*.md`. Append-only; supersede, don't edit.
-- **Roadmap state:** GitHub meta-issue `#1` with milestone checklist; sub-issues link from there.
+- **Roadmap state:** Pinned GitHub roadmap meta-issue (`bpechiney/chippy#2`) with milestone checklist; sub-issues link from there. View with `gh issue view 2 --repo bpechiney/chippy`.
 - **Lessons:** `docs/retros/MN.md` (frozen at write time) for what happened; `docs/snes-handoff.md` (curated, living) for what SNES needs to do/avoid.
 - **Skills registry:** `AGENTS.md`.
 - **Plan-of-record:** `~/.claude/plans/we-need-to-nail-smooth-bird.md`.
@@ -53,7 +53,7 @@ All commands run inside the pinned dev shell:
 
 **Lightweight (default — ~80% of PRs):**
 
-1. Pick `ready-for-agent` issue from meta-issue `#1`. Branch `N-slug` from `master`.
+1. Pick `ready-for-agent` issue from the pinned roadmap meta-issue. Branch `N-slug` from `master`.
 2. Implement *with tests in the same commit*.
 3. `/simplify` on the diff.
 4. `/commit`.
