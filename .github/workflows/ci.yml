@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Verify chippy_core invariants
+        run: |
+          set -e
+          if grep -rn 'std\.time\.Timer\|std\.crypto\.random' src/core/; then
+            echo "core invariant violation: std.time.Timer or std.crypto.random in src/core/"
+            exit 1
+          fi
+          if grep -rn '@import.*frontend' src/core/; then
+            echo "core invariant violation: src/core/ imports from src/frontend/"
+            exit 1
+          fi
+
+      - name: Build
+        run: nix develop -c zig build
+
+      - name: Test
+        run: nix develop -c zig build test
+
+      - name: Format check
+        run: nix develop -c zig fmt --check src/ build.zig

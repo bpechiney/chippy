@@ -1,0 +1,14 @@
+.{
+    .name = .chippy,
+    .version = "0.0.1",
+    .fingerprint = 0x82d9806ccd7a0d3b,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "README.md",
+    },
+    .dependencies = .{},
+}
