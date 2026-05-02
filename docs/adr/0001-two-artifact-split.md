@@ -1,0 +1,3 @@
+# Two-artifact split: `chippy_core` module + thin `chippy` exe; raylib at the frontend
+
+`chippy_core` is a Zig module with no host dependencies (`Machine`, `Bus`, `Cpu`, `Display`, `Keypad`, `Audio`, `Timing`, `Quirks`, `Rom`); `chippy` is a thin executable that `@import`s the core, links raylib (from M6 onward), and owns the window / audio / event loop. They share one source tree but are separate compilation roots — tests link only the core, so `zig build test` never resolves raylib and CI needs no display server. The decision pays for upfront build-graph ceremony in exchange for headless tests, save-state-shaped state from day one, and a shape that carries directly to the eventual SNES emulator.

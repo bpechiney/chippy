@@ -1,0 +1,3 @@
+# Vanilla COSMAC VIP CHIP-8 only, with a configurable `Quirks` struct
+
+Scope is vanilla COSMAC VIP CHIP-8 — no SUPER-CHIP, no XO-CHIP — but a `Quirks` config struct names the well-known ambiguities (shift source on `8XY6` / `8XYE`, `FX55` / `FX65` I-increment, `BNNN` jump base, vF reset on AND/OR/XOR, display wrap vs clip, vBlank wait on `DXYN`) and is defaulted to vanilla. The trade-off accepted is less compatibility breadth (S-CHIP / XO-CHIP ROMs won't run) in exchange for a fully understood scope, the ability to run Timendus' quirks-test ROM as a real verification step, and a config layer that rehearses the cartridge / region-flag pattern SNES will need.
