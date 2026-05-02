@@ -45,7 +45,12 @@ pub const Bus = struct {
     }
 
     pub fn read16(self: *const Bus, addr: u16) u16 {
+        // The second byte mask wraps at the 4 KB boundary. A legal CHIP-8 PC
+        // never reaches 0xFFF — programs live below 0xFFE since instructions
+        // are two bytes — so this only triggers on a malformed ROM that sets
+        // PC out of range, and we prefer "wrap quietly" over "panic the host"
+        // (rule 12 in CLAUDE.md).
         const masked = addr & 0x0FFF;
-        return (@as(u16, self.ram[masked]) << 8) | self.ram[(masked + 1) & 0x0FFF];
+        return (@as(u16, self.ram[masked]) << 8) | self.ram[(masked +% 1) & 0x0FFF];
     }
 };
