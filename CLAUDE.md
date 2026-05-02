@@ -49,11 +49,21 @@ All commands run inside the pinned dev shell:
     - Never calls `std.crypto.random` or any OS-randomness function.
     - Never panics on input that came from a ROM. Internal logic errors only.
 
+## Per-milestone loop
+
+Wraps the per-PR loop. See ADR 0007.
+
+1. **PRD first.** For M1 onward, run `/to-prd` (preceded by `/grill-with-docs` for heavyweight milestones — M3, M5, M6) to publish a structured milestone PRD as a `prd`-labeled, `needs-triage` GitHub issue. M0 is a degenerate case (its PRD is the plan + the M0 issue itself).
+2. **Slice.** Triage the PRD into 1–N implementation sub-issues with acceptance criteria. Sub-issues link back to the PRD as parent.
+3. **Triage to ready.** Move sub-issues from `needs-triage` to `ready-for-agent` (or `ready-for-human`).
+4. **Implement.** Per sub-issue, run the per-PR loop below.
+5. **Close.** After the last sub-issue merges: write `docs/retros/MN.md`, promote SNES-bound bullets to `docs/snes-handoff.md`, close the PRD issue, tick the meta-issue checkbox.
+
 ## Per-PR loop
 
 **Lightweight (default — ~80% of PRs):**
 
-1. Pick `ready-for-agent` issue from the pinned roadmap meta-issue. Branch `N-slug` from `master`.
+1. Pick `ready-for-agent` sub-issue. Branch `N-slug` from `master`.
 2. Implement *with tests in the same commit*.
 3. `/simplify` on the diff.
 4. `/commit`.
@@ -62,7 +72,7 @@ All commands run inside the pinned dev shell:
 7. CI green on `ubuntu-latest` ∩ `macos-latest`.
 8. Merge.
 
-**Heavyweight gate (architectural-shape PRs — M0, M3, M6, maybe M5; cross-module refactors):**
+**Heavyweight gate (architectural-shape sub-issues — M0, M3, M6, maybe M5; cross-module refactors):**
 
 Run `/feature-dev` at the start. Pipeline: `code-explorer` → clarifying questions → 2–3 parallel `code-architect` agents (minimal-change / clean-arch / pragmatic-balance) → user picks → user approves → 3 parallel `code-reviewer` agents at end. Optional `/ultrareview` final pass.
 
