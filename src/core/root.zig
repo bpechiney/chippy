@@ -29,4 +29,5 @@ test {
     _ = @import("trace.zig");
     _ = @import("options.zig");
     _ = @import("assemble.zig");
+    _ = @import("golden_ibm_logo.zig");
 }

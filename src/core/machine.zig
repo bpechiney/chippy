@@ -333,6 +333,33 @@ test "0NNN (non-00E0) is a silent no-op that only advances PC" {
     try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(10, 5));
 }
 
+test "serialize and deserialize roundtrip preserves a live IBM-logo framebuffer" {
+    // The hand-set roundtrip test below already covers all 11 fields. This
+    // test's value is proving the same discipline survives live DXYN-produced
+    // state — the next emulator (Game Boy first, per ADR 0010) will hit this
+    // pattern against MBC/mapper variants.
+    const cwd = std.Io.Dir.cwd();
+    const io = std.testing.io;
+    const rom_bytes = try cwd.readFileAlloc(io, "tests/test_roms/ibm_logo.ch8", std.testing.allocator, .limited(bus_mod.ROM_MAX_BYTES));
+    defer std.testing.allocator.free(rom_bytes);
+
+    var src = Machine.init(.{});
+    defer src.deinit();
+    try src.loadRom(rom_bytes);
+    _ = src.runCycles(30);
+
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    try src.serialize(&aw.writer);
+
+    var dst = Machine.init(.{});
+    defer dst.deinit();
+    var reader = std.Io.Reader.fixed(aw.written());
+    try dst.deserialize(&reader);
+
+    try std.testing.expectEqualSlices(u1, &src.framebuffer.pixels, &dst.framebuffer.pixels);
+}
+
 test "serialize and deserialize roundtrip preserves machine state" {
     var src = Machine.init(.{ .rng_seed = 42 });
     defer src.deinit();
