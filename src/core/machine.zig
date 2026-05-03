@@ -49,6 +49,14 @@ pub const Machine = struct {
         @memcpy(self.bus.ram[start .. start + bytes.len], bytes);
     }
 
+    /// Test-only intervention: lets external-ROM golden tests set in-RAM
+    /// control bytes the ROM expects pre-boot (e.g. Timendus's 5-quirks.ch8
+    /// reads `RAM[0x1FF]` to pick a platform). Provides the abstraction
+    /// boundary the Game Boy-bound bus-private refactor will preserve.
+    pub fn pokeRam(self: *Machine, addr: u12, byte: u8) void {
+        self.bus.ram[addr] = byte;
+    }
+
     pub fn step(self: *Machine) StepResult {
         const opcode = self.bus.read16(self.cpu.pc);
         if (self.shouldStallForVblank(opcode)) return .waiting_for_vblank;
@@ -340,6 +348,14 @@ test "loadRom copies bytes to 0x200 and rejects oversized input" {
 
     const oversized = [_]u8{0xAA} ** (4096 - 0x200 + 1);
     try std.testing.expectError(error.RomTooLarge, m.loadRom(&oversized));
+}
+
+test "pokeRam writes the given byte at the given address" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+
+    m.pokeRam(0x1FF, 1);
+    try std.testing.expectEqual(@as(u8, 1), m.bus.ram[0x1FF]);
 }
 
 test "runCycles runs all requested cycles when nothing halts" {
