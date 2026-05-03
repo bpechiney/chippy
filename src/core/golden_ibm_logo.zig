@@ -16,7 +16,7 @@ const std = @import("std");
 const Machine = @import("machine.zig").Machine;
 const Framebuffer = @import("display.zig").Framebuffer;
 const display = @import("display.zig");
-const bus = @import("bus.zig");
+const bus_mod = @import("bus.zig");
 
 const ROM_PATH = "tests/test_roms/ibm_logo.ch8";
 const GOLDEN_PATH = "tests/test_goldens/ibm_logo_after_30_cycles.bin";
@@ -49,7 +49,7 @@ test "IBM logo: framebuffer after 30 cycles matches golden" {
     const cwd = std.Io.Dir.cwd();
     const io = std.testing.io;
 
-    const rom = try cwd.readFileAlloc(io, ROM_PATH, std.testing.allocator, .limited(bus.ROM_MAX_BYTES));
+    const rom = try cwd.readFileAlloc(io, ROM_PATH, std.testing.allocator, .limited(bus_mod.ROM_MAX_BYTES));
     defer std.testing.allocator.free(rom);
 
     var m = Machine.init(.{});

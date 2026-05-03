@@ -1,8 +1,10 @@
 # Vendored test ROMs
 
 These ROMs are committed verbatim so the verification spine (ADR 0004) is
-self-contained: tests `@embedFile` them at compile time and CI re-runs the
-exact bytes any contributor sees locally.
+self-contained: tests load them at runtime (see the file-level doc in
+`src/core/golden_ibm_logo.zig` for the `@embedFile` package-path constraint
+that motivates this), and CI re-runs the exact bytes any contributor sees
+locally.
 
 ## `ibm_logo.ch8`
 
