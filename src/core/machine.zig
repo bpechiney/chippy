@@ -45,16 +45,20 @@ pub const Machine = struct {
 
     pub fn loadRom(self: *Machine, bytes: []const u8) rom.RomError!void {
         try rom.validate(bytes);
-        const start = bus_mod.ROM_LOAD_ADDRESS;
-        @memcpy(self.bus.ram[start .. start + bytes.len], bytes);
+        self.bus.loadRom(bytes);
     }
 
     /// Test-only intervention: lets external-ROM golden tests set in-RAM
     /// control bytes the ROM expects pre-boot (e.g. Timendus's 5-quirks.ch8
-    /// reads `RAM[0x1FF]` to pick a platform). Provides the abstraction
-    /// boundary the Game Boy-bound bus-private refactor will preserve.
+    /// reads `RAM[0x1FF]` to pick a platform).
     pub fn pokeRam(self: *Machine, addr: u12, byte: u8) void {
-        self.bus.ram[addr] = byte;
+        self.bus.write8(addr, byte);
+    }
+
+    /// Test-only bulk-seed counterpart to `pokeRam`. Routes through `Bus`
+    /// so the 12-bit-mask invariant stays structurally enforced.
+    pub fn pokeRamSlice(self: *Machine, addr: u12, bytes: []const u8) void {
+        self.bus.pokeSlice(addr, bytes);
     }
 
     pub fn step(self: *Machine) StepResult {
@@ -307,7 +311,7 @@ pub const Machine = struct {
     /// grows the state. The next emulator (Game Boy first) will need this
     /// same shape across MBC / mapper variants.
     pub fn serialize(self: *const Machine, writer: anytype) !void {
-        try writer.writeAll(&self.bus.ram);
+        try self.bus.serialize(writer);
         try writer.writeAll(&self.cpu.v);
         try writer.writeInt(u16, self.cpu.i, .big);
         try writer.writeInt(u16, self.cpu.pc, .big);
@@ -321,7 +325,7 @@ pub const Machine = struct {
     }
 
     pub fn deserialize(self: *Machine, reader: anytype) !void {
-        try reader.readSliceAll(&self.bus.ram);
+        self.bus = try Bus.deserialize(reader);
         try reader.readSliceAll(&self.cpu.v);
         self.cpu.i = try reader.takeInt(u16, .big);
         self.cpu.pc = try reader.takeInt(u16, .big);
@@ -341,12 +345,12 @@ test "init places PC at the ROM load address and seats the fontset in RAM" {
 
     try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
     // First byte of the '0' glyph at the start of the fontset.
-    try std.testing.expectEqual(@as(u8, 0xF0), m.bus.ram[0x050]);
+    try std.testing.expectEqual(@as(u8, 0xF0), m.bus.read8(0x050));
     // Last byte of the 'F' glyph (0x80) — fontset is 16 glyphs * 5 bytes = 80.
-    try std.testing.expectEqual(@as(u8, 0x80), m.bus.ram[0x050 + 79]);
+    try std.testing.expectEqual(@as(u8, 0x80), m.bus.read8(0x050 + 79));
     // Reserved region is zero.
-    try std.testing.expectEqual(@as(u8, 0x00), m.bus.ram[0x000]);
-    try std.testing.expectEqual(@as(u8, 0x00), m.bus.ram[0x04F]);
+    try std.testing.expectEqual(@as(u8, 0x00), m.bus.read8(0x000));
+    try std.testing.expectEqual(@as(u8, 0x00), m.bus.read8(0x04F));
 }
 
 test "loadRom copies bytes to 0x200 and rejects oversized input" {
@@ -355,7 +359,7 @@ test "loadRom copies bytes to 0x200 and rejects oversized input" {
 
     const small_rom = [_]u8{ 0x12, 0x34, 0x56, 0x78 };
     try m.loadRom(&small_rom);
-    try std.testing.expectEqualSlices(u8, &small_rom, m.bus.ram[0x200..0x204]);
+    try std.testing.expectEqualSlices(u8, &small_rom, m.bus.peekSlice(0x200, 4));
 
     const oversized = [_]u8{0xAA} ** (4096 - 0x200 + 1);
     try std.testing.expectError(error.RomTooLarge, m.loadRom(&oversized));
@@ -366,7 +370,7 @@ test "pokeRam writes the given byte at the given address" {
     defer m.deinit();
 
     m.pokeRam(0x1FF, 1);
-    try std.testing.expectEqual(@as(u8, 1), m.bus.ram[0x1FF]);
+    try std.testing.expectEqual(@as(u8, 1), m.bus.read8(0x1FF));
 }
 
 test "runCycles runs all requested cycles when nothing halts" {
@@ -469,9 +473,7 @@ test "DXYN draws an N-byte sprite at (V[X], V[Y]) from RAM[I] and reports no col
     var m = Machine.init(.{});
     defer m.deinit();
     const sprite = [_]u8{ 0b1010_0011, 0b1100_0000, 0b0000_1111 };
-    m.bus.ram[0x300] = sprite[0];
-    m.bus.ram[0x301] = sprite[1];
-    m.bus.ram[0x302] = sprite[2];
+    m.pokeRamSlice(0x300, &sprite);
     m.cpu.i = 0x300;
     m.cpu.v[0x2] = 5;
     m.cpu.v[0x3] = 7;
@@ -493,7 +495,7 @@ test "DXYN draws an N-byte sprite at (V[X], V[Y]) from RAM[I] and reports no col
 test "DXYN drawing the same sprite twice at the same coords erases it and sets vF == 1" {
     var m = Machine.init(.{});
     defer m.deinit();
-    m.bus.ram[0x300] = 0b1111_0000;
+    m.pokeRam(0x300, 0b1111_0000);
     m.cpu.i = 0x300;
     m.cpu.v[0x4] = 10;
     m.cpu.v[0x5] = 12;
@@ -520,7 +522,7 @@ test "DXYN advances PC by 2" {
 test "DXYN: vblank_wait_on_draw=true off frame boundary stalls and preserves PC + framebuffer" {
     var m = Machine.init(.{});
     defer m.deinit();
-    m.bus.ram[0x300] = 0xFF;
+    m.pokeRam(0x300, 0xFF);
     m.cpu.i = 0x300;
     try m.loadRom(&assemble(.{0xD001}));
     m.timing.cycles = 1; // cycles_per_frame = 700/60 = 11; 1 % 11 != 0
@@ -536,7 +538,7 @@ test "DXYN: vblank_wait_on_draw=true on frame boundary executes immediately" {
     // Cycle 0 is a frame boundary (0 % 11 == 0). DXYN executes on the spot.
     var m = Machine.init(.{});
     defer m.deinit();
-    m.bus.ram[0x300] = 0xFF;
+    m.pokeRam(0x300, 0xFF);
     m.cpu.i = 0x300;
     try m.loadRom(&assemble(.{0xD001}));
 
@@ -550,7 +552,7 @@ test "DXYN: vblank_wait_on_draw=true on frame boundary executes immediately" {
 test "DXYN: vblank_wait_on_draw=false executes off frame boundary" {
     var m = Machine.init(.{ .quirks = .{ .vblank_wait_on_draw = false } });
     defer m.deinit();
-    m.bus.ram[0x300] = 0xFF;
+    m.pokeRam(0x300, 0xFF);
     m.cpu.i = 0x300;
     try m.loadRom(&assemble(.{0xD001}));
     m.timing.cycles = 1; // not on boundary; quirk-off path ignores it
@@ -568,7 +570,7 @@ test "runCycles: vblank_wait_on_draw=true burns stall cycles until DXYN reaches 
     // eventually executes when the boundary is reached.
     var m = Machine.init(.{});
     defer m.deinit();
-    m.bus.ram[0x300] = 0xFF;
+    m.pokeRam(0x300, 0xFF);
     m.cpu.i = 0x300;
     try m.loadRom(&assemble(.{0xD001}));
     m.timing.cycles = 1;
@@ -584,7 +586,7 @@ test "runCycles: vblank_wait_on_draw=true burns stall cycles until DXYN reaches 
 test "DXYN: display_clipping=false wraps overflowing pixels around the right edge" {
     var m = Machine.init(.{ .quirks = .{ .display_clipping = false } });
     defer m.deinit();
-    m.bus.ram[0x300] = 0xFF;
+    m.pokeRam(0x300, 0xFF);
     m.cpu.i = 0x300;
     m.cpu.v[0x2] = 60;
     m.cpu.v[0x3] = 0;
@@ -1559,7 +1561,7 @@ test "FX29 points I at the 5-byte fontset glyph for each hex digit 0..F" {
 
         try std.testing.expectEqual(StepResult.ran, m.step());
 
-        try std.testing.expectEqualSlices(u8, &expected, m.bus.ram[m.cpu.i .. m.cpu.i + FONT_GLYPH_BYTES]);
+        try std.testing.expectEqualSlices(u8, &expected, m.bus.peekSlice(@intCast(m.cpu.i), FONT_GLYPH_BYTES));
     }
 }
 
@@ -1592,7 +1594,7 @@ test "FX29 ignores the high nibble of VX (digit selected from low 4 bits only)" 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
     const expected = [_]u8{ 0xF0, 0x80, 0xF0, 0x10, 0xF0 };
-    try std.testing.expectEqualSlices(u8, &expected, m.bus.ram[m.cpu.i .. m.cpu.i + FONT_GLYPH_BYTES]);
+    try std.testing.expectEqualSlices(u8, &expected, m.bus.peekSlice(@intCast(m.cpu.i), FONT_GLYPH_BYTES));
 }
 
 test "serialize and deserialize roundtrip preserves a live IBM-logo framebuffer" {
@@ -1656,9 +1658,7 @@ test "serialize and deserialize roundtrip preserves machine state set by M2.8/M2
 
     try std.testing.expectEqual(@as(u8, 0x55), dst.cpu.v[0xA]);
     try std.testing.expectEqual(@as(u16, 0x308), dst.cpu.i);
-    try std.testing.expectEqual(@as(u8, 0xC0), dst.bus.ram[0x305]);
-    try std.testing.expectEqual(@as(u8, 0xC1), dst.bus.ram[0x306]);
-    try std.testing.expectEqual(@as(u8, 0xC2), dst.bus.ram[0x307]);
+    try std.testing.expectEqualSlices(u8, &.{ 0xC0, 0xC1, 0xC2 }, dst.bus.peekSlice(0x305, 3));
     try std.testing.expectEqual(@as(u16, 0x456), dst.cpu.pc);
     try std.testing.expectEqual(@as(u4, 1), dst.cpu.sp);
     try std.testing.expectEqual(@as(u16, 0x208), dst.cpu.stack[0]);
@@ -1678,9 +1678,7 @@ test "FX33 writes hundreds, tens, units of VX (123) into RAM[I], RAM[I+1], RAM[I
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    try std.testing.expectEqual(@as(u8, 1), m.bus.ram[0x300]);
-    try std.testing.expectEqual(@as(u8, 2), m.bus.ram[0x301]);
-    try std.testing.expectEqual(@as(u8, 3), m.bus.ram[0x302]);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, m.bus.peekSlice(0x300, 3));
     try std.testing.expectEqual(@as(u16, 0x300), m.cpu.i);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
@@ -1694,9 +1692,7 @@ test "FX33 writes (2, 5, 5) for VX=255 — max u8 boundary" {
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    try std.testing.expectEqual(@as(u8, 2), m.bus.ram[0x300]);
-    try std.testing.expectEqual(@as(u8, 5), m.bus.ram[0x301]);
-    try std.testing.expectEqual(@as(u8, 5), m.bus.ram[0x302]);
+    try std.testing.expectEqualSlices(u8, &.{ 2, 5, 5 }, m.bus.peekSlice(0x300, 3));
 }
 
 test "FX33 writes (0, 0, 0) for VX=0" {
@@ -1704,16 +1700,12 @@ test "FX33 writes (0, 0, 0) for VX=0" {
     defer m.deinit();
     m.cpu.v[0x3] = 0;
     m.cpu.i = 0x300;
-    m.bus.ram[0x300] = 0xAA;
-    m.bus.ram[0x301] = 0xBB;
-    m.bus.ram[0x302] = 0xCC;
+    m.pokeRamSlice(0x300, &.{ 0xAA, 0xBB, 0xCC });
     try m.loadRom(&assemble(.{0xF333}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    try std.testing.expectEqual(@as(u8, 0), m.bus.ram[0x300]);
-    try std.testing.expectEqual(@as(u8, 0), m.bus.ram[0x301]);
-    try std.testing.expectEqual(@as(u8, 0), m.bus.ram[0x302]);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0 }, m.bus.peekSlice(0x300, 3));
 }
 
 test "FX55 with X=0 writes only V0 to RAM[I] and increments I by 1 (vanilla VIP)" {
@@ -1724,13 +1716,12 @@ test "FX55 with X=0 writes only V0 to RAM[I] and increments I by 1 (vanilla VIP)
     m.cpu.v[0x0] = 0x42;
     m.cpu.v[0x1] = 0x99;
     m.cpu.i = 0x300;
-    m.bus.ram[0x301] = 0xAA;
+    m.pokeRam(0x301, 0xAA);
     try m.loadRom(&assemble(.{0xF055}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    try std.testing.expectEqual(@as(u8, 0x42), m.bus.ram[0x300]);
-    try std.testing.expectEqual(@as(u8, 0xAA), m.bus.ram[0x301]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x42, 0xAA }, m.bus.peekSlice(0x300, 2));
     try std.testing.expectEqual(@as(u16, 0x301), m.cpu.i);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
@@ -1738,15 +1729,14 @@ test "FX55 with X=0 writes only V0 to RAM[I] and increments I by 1 (vanilla VIP)
 test "FX55 with X=15 stores V0..VF to RAM[I..I+15] and increments I by 16 (vanilla VIP)" {
     var m = Machine.init(.{});
     defer m.deinit();
-    for (0..16) |j| m.cpu.v[j] = @as(u8, @intCast(j)) +% 0xA0;
+    const expected = [16]u8{ 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF };
+    m.cpu.v = expected;
     m.cpu.i = 0x300;
     try m.loadRom(&assemble(.{0xFF55}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    for (0..16) |j| {
-        try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.bus.ram[0x300 + j]);
-    }
+    try std.testing.expectEqualSlices(u8, &expected, m.bus.peekSlice(0x300, 16));
     try std.testing.expectEqual(@as(u16, 0x310), m.cpu.i);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
@@ -1754,15 +1744,14 @@ test "FX55 with X=15 stores V0..VF to RAM[I..I+15] and increments I by 16 (vanil
 test "FX55: no_index_increment=true stores V0..VX to RAM[I..] but leaves I unchanged" {
     var m = Machine.init(.{ .quirks = .{ .no_index_increment = true } });
     defer m.deinit();
-    for (0..16) |j| m.cpu.v[j] = @as(u8, @intCast(j)) +% 0xA0;
+    const expected = [16]u8{ 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF };
+    m.cpu.v = expected;
     m.cpu.i = 0x300;
     try m.loadRom(&assemble(.{0xFF55}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    for (0..16) |j| {
-        try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.bus.ram[0x300 + j]);
-    }
+    try std.testing.expectEqualSlices(u8, &expected, m.bus.peekSlice(0x300, 16));
     try std.testing.expectEqual(@as(u16, 0x300), m.cpu.i);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
@@ -1775,8 +1764,7 @@ test "FX65 with X=0 loads V0 from RAM[I] and increments I by 1 (vanilla VIP)" {
     m.cpu.v[0x0] = 0x99;
     m.cpu.v[0x1] = 0x77;
     m.cpu.i = 0x300;
-    m.bus.ram[0x300] = 0x42;
-    m.bus.ram[0x301] = 0xBB;
+    m.pokeRamSlice(0x300, &.{ 0x42, 0xBB });
     try m.loadRom(&assemble(.{0xF065}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
@@ -1790,15 +1778,14 @@ test "FX65 with X=0 loads V0 from RAM[I] and increments I by 1 (vanilla VIP)" {
 test "FX65 with X=15 loads V0..VF from RAM[I..I+15] and increments I by 16 (vanilla VIP)" {
     var m = Machine.init(.{});
     defer m.deinit();
+    const expected = [16]u8{ 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF };
     m.cpu.i = 0x300;
-    for (0..16) |j| m.bus.ram[0x300 + j] = @as(u8, @intCast(j)) +% 0xA0;
+    m.pokeRamSlice(0x300, &expected);
     try m.loadRom(&assemble(.{0xFF65}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    for (0..16) |j| {
-        try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.cpu.v[j]);
-    }
+    try std.testing.expectEqualSlices(u8, &expected, &m.cpu.v);
     try std.testing.expectEqual(@as(u16, 0x310), m.cpu.i);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
@@ -1806,15 +1793,14 @@ test "FX65 with X=15 loads V0..VF from RAM[I..I+15] and increments I by 16 (vani
 test "FX65: no_index_increment=true loads V0..VX from RAM[I..] but leaves I unchanged" {
     var m = Machine.init(.{ .quirks = .{ .no_index_increment = true } });
     defer m.deinit();
+    const expected = [16]u8{ 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF };
     m.cpu.i = 0x300;
-    for (0..16) |j| m.bus.ram[0x300 + j] = @as(u8, @intCast(j)) +% 0xA0;
+    m.pokeRamSlice(0x300, &expected);
     try m.loadRom(&assemble(.{0xFF65}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    for (0..16) |j| {
-        try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.cpu.v[j]);
-    }
+    try std.testing.expectEqualSlices(u8, &expected, &m.cpu.v);
     try std.testing.expectEqual(@as(u16, 0x300), m.cpu.i);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
@@ -1832,16 +1818,14 @@ test "FX55 with I past 0xFFF wraps RAM addressing at 12 bits rather than panicki
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    try std.testing.expectEqual(@as(u8, 0x42), m.bus.ram[0xFFE]);
-    try std.testing.expectEqual(@as(u8, 0x77), m.bus.ram[0xFFF]);
+    try std.testing.expectEqualSlices(u8, &.{ 0x42, 0x77 }, m.bus.peekSlice(0xFFE, 2));
     try std.testing.expectEqual(@as(u16, 0x0000), m.cpu.i);
 }
 
 test "FX65 with I past 0xFFF wraps RAM addressing at 12 bits rather than panicking the host" {
     var m = Machine.init(.{});
     defer m.deinit();
-    m.bus.ram[0xFFE] = 0x42;
-    m.bus.ram[0xFFF] = 0x77;
+    m.pokeRamSlice(0xFFE, &.{ 0x42, 0x77 });
     m.cpu.i = 0xFFFE;
     try m.loadRom(&assemble(.{0xF165}));
 
@@ -1909,7 +1893,7 @@ test "trace writer is zero-cost when null: cpu/framebuffer/timing state byte-ide
 
     var no_trace = Machine.init(.{});
     defer no_trace.deinit();
-    no_trace.bus.ram[0x300] = 0xFF;
+    no_trace.pokeRam(0x300, 0xFF);
     try no_trace.loadRom(&program);
     _ = no_trace.runCycles(7);
 
@@ -1917,7 +1901,7 @@ test "trace writer is zero-cost when null: cpu/framebuffer/timing state byte-ide
     var sink_state: BufferSink = .{ .buf = &buf };
     var with_trace = Machine.init(.{ .trace = sink_state.sink() });
     defer with_trace.deinit();
-    with_trace.bus.ram[0x300] = 0xFF;
+    with_trace.pokeRam(0x300, 0xFF);
     try with_trace.loadRom(&program);
     _ = with_trace.runCycles(7);
 
@@ -1944,7 +1928,7 @@ test "sprite-draw log emits one record per DXYN with cycle, x, y, n, collision" 
         .quirks = .{ .vblank_wait_on_draw = false },
     });
     defer m.deinit();
-    m.bus.ram[0x300] = 0xFF;
+    m.pokeRam(0x300, 0xFF);
     try m.loadRom(&assemble(.{ 0xA300, 0xD001, 0xD001 }));
 
     _ = m.runCycles(3);
@@ -1967,8 +1951,7 @@ test "trace state-delta tokens render as locked: FB-CLEAR, V[X]=, VF=, DT=, I=, 
         .quirks = .{ .vblank_wait_on_draw = false },
     });
     defer m.deinit();
-    m.bus.ram[0x300] = 0xFF;
-    m.bus.ram[0x301] = 0xFF;
+    m.pokeRamSlice(0x300, &.{ 0xFF, 0xFF });
     try m.loadRom(&assemble(.{
         0x00E0, 0x6005, 0x6103, 0x8014, 0xF015, 0xA300, 0xD012, 0x0123,
     }));
@@ -2001,7 +1984,7 @@ test "trace DXYN renders the pre-step coord even when X- or Y-reg is VF (collisi
     });
     defer m.deinit();
     m.cpu.v[0xF] = 5;
-    m.bus.ram[0x300] = 0xFF;
+    m.pokeRam(0x300, 0xFF);
     try m.loadRom(&assemble(.{ 0xA300, 0xDFF1 }));
 
     _ = m.runCycles(2);
@@ -2039,7 +2022,7 @@ test "sprite-draw log null sink receives zero writes when DXYN executes" {
     const sink_state: BufferSink = .{ .buf = &buf };
     var m = Machine.init(.{ .sprite_log = null });
     defer m.deinit();
-    m.bus.ram[0x300] = 0xFF;
+    m.pokeRam(0x300, 0xFF);
     try m.loadRom(&assemble(.{ 0xA300, 0xD001, 0xD001 }));
 
     _ = m.runCycles(3);

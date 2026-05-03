@@ -21,5 +21,5 @@ test "assemble emits big-endian byte pairs that loadRom accepts" {
     var m = Machine.init(.{});
     defer m.deinit();
     try m.loadRom(&bytes);
-    try std.testing.expectEqualSlices(u8, &bytes, m.bus.ram[0x200 .. 0x200 + bytes.len]);
+    try std.testing.expectEqualSlices(u8, &bytes, m.bus.peekSlice(0x200, bytes.len));
 }
