@@ -1388,9 +1388,9 @@ test "FX0A phase 2 consume: claimed key released writes V[X] = K, clears claim, 
 
 test "FX0A mid-stall: Machine.serialize/deserialize through the codec preserves the active claim" {
     // Integration test for the Machine.serialize → Keypad.serialize delegation
-    // path with a non-null awaiting_release. Catches a delegation-wiring bug
-    // (wrong byte order, extra byte, off-by-one) that the Keypad-level codec
-    // test alone wouldn't surface.
+    // path with an active claim slot. Catches a delegation-wiring bug (wrong
+    // byte order, extra byte, off-by-one) that the Keypad-level codec test
+    // alone wouldn't surface.
     var src = Machine.init(.{});
     defer src.deinit();
     try src.loadRom(&assemble(.{0xF50A}));
