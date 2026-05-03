@@ -1,7 +1,6 @@
-//! CHIP-8 opcode nibble field accessors. Pure functions over `u16` opcodes
-//! returning the narrowest type that fits each field, so call sites in
-//! `machine.zig` and `disasm.zig` can drop the `@intCast` / `@truncate` they
-//! otherwise needed for register indexing and immediate values.
+//! Return types are narrowed to the field's natural width so call sites can
+//! index `[16]u8` register banks and assign to `u8` immediates without the
+//! ceremony of a per-site `@intCast` / `@truncate`.
 
 const std = @import("std");
 
