@@ -27,8 +27,9 @@ pub const Keypad = struct {
         return self.awaiting_release != null;
     }
 
-    /// One cycle of FX0A's two-phase wait. Pre-claim release events are
-    /// discarded (VIP-faithful). See ADR 0013.
+    /// One cycle of FX0A's two-phase wait. Keys pressed and released before
+    /// FX0A is reached are invisible — only keys held at poll time are
+    /// observed (VIP-faithful). See ADR 0013.
     pub fn pollAwaitedKey(self: *Keypad) ?u4 {
         if (self.awaiting_release) |claimed| {
             if (self.isDown(claimed)) return null;
@@ -46,8 +47,7 @@ pub const Keypad = struct {
     }
 
     /// Save-state codec: u16 state (big-endian) + u8 slot (0xFF = null).
-    /// Bytes match the format `Machine.serialize` previously inlined for
-    /// keypad fields, so existing save-state files round-trip unchanged.
+    /// Format is wire-compatible with prior chippy save-state files.
     pub fn serialize(self: *const Keypad, writer: anytype) !void {
         try writer.writeInt(u16, self.state, .big);
         try writer.writeInt(u8, self.awaiting_release orelse 0xFF, .big);

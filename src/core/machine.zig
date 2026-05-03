@@ -1342,6 +1342,13 @@ test "FX0A phase 1 → 2: lowest-indexed held key is claimed and the stall conti
 
     try std.testing.expect(m.keypad.isAwaiting());
     try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
+
+    // Releasing 0x3 must satisfy the next step — proves 0x3 was claimed,
+    // not 0xA or 0xC (mirrors the Keypad-level lowest-claim test).
+    m.setKey(0x3, false);
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u8, 0x3), m.cpu.v[0x5]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
 test "FX0A phase 2 stall: claimed key still held — keeps stalling without advancing PC" {
@@ -1377,6 +1384,37 @@ test "FX0A phase 2 consume: claimed key released writes V[X] = K, clears claim, 
 
     try std.testing.expectEqual(StepResult.waiting_for_key, m.step());
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX0A mid-stall: Machine.serialize/deserialize through the codec preserves the active claim" {
+    // Integration test for the Machine.serialize → Keypad.serialize delegation
+    // path with a non-null awaiting_release. Catches a delegation-wiring bug
+    // (wrong byte order, extra byte, off-by-one) that the Keypad-level codec
+    // test alone wouldn't surface.
+    var src = Machine.init(.{});
+    defer src.deinit();
+    try src.loadRom(&assemble(.{0xF50A}));
+    src.setKey(0x9, true);
+    try std.testing.expectEqual(StepResult.waiting_for_key, src.step());
+    try std.testing.expect(src.keypad.isAwaiting());
+
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    try src.serialize(&aw.writer);
+
+    var dst = Machine.init(.{});
+    defer dst.deinit();
+    var reader = std.Io.Reader.fixed(aw.written());
+    try dst.deserialize(&reader);
+
+    try std.testing.expect(dst.keypad.isAwaiting());
+
+    // Releasing 0x9 on the restored Machine must consume — proves the right
+    // key value survived the round-trip, not just the phase indicator.
+    dst.setKey(0x9, true);
+    dst.setKey(0x9, false);
+    try std.testing.expectEqual(StepResult.ran, dst.step());
+    try std.testing.expectEqual(@as(u8, 0x9), dst.cpu.v[0x5]);
 }
 
 test "runUntil breaks on waiting_for_key and propagates the variant" {
