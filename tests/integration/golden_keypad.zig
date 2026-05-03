@@ -16,10 +16,10 @@
 //! review time.
 
 const std = @import("std");
-const Machine = @import("machine.zig").Machine;
+const chippy = @import("chippy_core");
+const Machine = chippy.Machine;
 const harness = @import("golden_harness.zig");
 const scripted = @import("scripted_input.zig");
-const bus_mod = @import("bus.zig");
 
 const ROM_PATH = "tests/test_roms/keypad.ch8";
 
@@ -57,7 +57,7 @@ fn runSubtest(spec: SubtestSpec) !void {
     const cwd = std.Io.Dir.cwd();
     const io = std.testing.io;
 
-    const rom = try cwd.readFileAlloc(io, ROM_PATH, std.testing.allocator, .limited(bus_mod.ROM_MAX_BYTES));
+    const rom = try cwd.readFileAlloc(io, ROM_PATH, std.testing.allocator, .limited(chippy.ROM_MAX_BYTES));
     defer std.testing.allocator.free(rom);
 
     var m = Machine.init(.{});

@@ -98,6 +98,17 @@ jobs:
             echo "core invariant violation: bus.ram[ accessed outside src/core/bus.zig (use Bus.read8 / write8 / loadRom / pokeSlice / peekSlice / serialize / deserialize, or Machine.pokeRam / pokeRamSlice)"
             exit 1
           fi
+          # Integration tests live in their own module (ADR 0014) and reach
+          # `chippy_core` only via the public API. A relative `@import` that
+          # walks back into `src/core/` would defeat the structural split —
+          # flag any such path here. The Zig module boundary already prevents
+          # symbol leakage at compile time, but the grep keeps the contract
+          # legible at PR-review time and catches a path-typed bypass in one
+          # line.
+          if grep -rn '@import.*"\(\.\./\)\+src/core' tests/integration/; then
+            echo "integration-test invariant violation: tests/integration/ must import chippy_core only via the public API, not relative paths into src/core/"
+            exit 1
+          fi
 
       - name: Build
         run: nix develop -c zig build
@@ -106,7 +117,7 @@ jobs:
         run: nix develop -c zig build test
 
       - name: Format check
-        run: nix develop -c zig fmt --check src/ build.zig
+        run: nix develop -c zig fmt --check src/ build.zig tests/integration/
 
   required:
     needs: [changes, test]

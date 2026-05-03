@@ -5,15 +5,14 @@
 //! Files load via runtime relative paths (`cwd.readFileAlloc` with CWD =
 //! repo root) instead of `@embedFile` because Zig restricts `@embedFile`
 //! to paths inside the module's package directory, and `tests/test_roms/`
-//! (ADR 0004) sits outside `chippy_core`'s root at `src/core/`.
+//! (ADR 0004) sits outside the integration-test module's root.
 
 const std = @import("std");
-const Machine = @import("machine.zig").Machine;
-const Framebuffer = @import("display.zig").Framebuffer;
-const display = @import("display.zig");
-const bus_mod = @import("bus.zig");
+const chippy = @import("chippy_core");
+const Machine = chippy.Machine;
+const Framebuffer = chippy.Framebuffer;
 
-pub const PACKED_BYTES: usize = display.PIXELS / 8;
+pub const PACKED_BYTES: usize = Framebuffer.PIXELS / 8;
 
 pub const RunMode = union(enum) {
     cycles: u32,
@@ -31,7 +30,7 @@ pub fn runAndCompare(opts: RunOptions) !void {
     const cwd = std.Io.Dir.cwd();
     const io = std.testing.io;
 
-    const rom = try cwd.readFileAlloc(io, opts.rom_path, std.testing.allocator, .limited(bus_mod.ROM_MAX_BYTES));
+    const rom = try cwd.readFileAlloc(io, opts.rom_path, std.testing.allocator, .limited(chippy.ROM_MAX_BYTES));
     defer std.testing.allocator.free(rom);
 
     var m = Machine.init(.{});
@@ -64,14 +63,14 @@ pub fn runAndCompare(opts: RunOptions) !void {
 // Row-major, MSB = leftmost so a hex dump of the snapshot reads like the screen.
 pub fn packFramebuffer(fb: *const Framebuffer) [PACKED_BYTES]u8 {
     var out: [PACKED_BYTES]u8 = [_]u8{0} ** PACKED_BYTES;
-    for (0..display.HEIGHT) |row| {
-        for (0..display.WIDTH / 8) |byte_col| {
+    for (0..Framebuffer.HEIGHT) |row| {
+        for (0..Framebuffer.WIDTH / 8) |byte_col| {
             var b: u8 = 0;
             for (0..8) |bit| {
                 const px = fb.get(byte_col * 8 + bit, row);
                 b |= @as(u8, px) << @intCast(7 - bit);
             }
-            out[row * (display.WIDTH / 8) + byte_col] = b;
+            out[row * (Framebuffer.WIDTH / 8) + byte_col] = b;
         }
     }
     return out;
