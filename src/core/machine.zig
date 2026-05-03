@@ -953,16 +953,19 @@ test "CXNN with NN=0xFF emits the deterministic prng byte stream for the seeded 
 }
 
 test "CXNN ANDs the random byte with NN (high nibble cleared when NN=0x0F)" {
-    // First seeded byte is 0xE0 (see deterministic-stream test above), so
-    // 0xE0 AND 0x0F = 0x00 — proves both the mask is applied and the high
-    // nibble is cleared.
+    // First two seeded bytes are 0xE0, 0xC3 (see deterministic-stream test
+    // above). The first 0xC?FF burns 0xE0; the 0xC50F then masks 0xC3 with
+    // 0x0F → 0x03. That non-trivial result distinguishes a real mask from
+    // mutations that always produce zero — the obvious `0xE0 & 0x0F = 0x00`
+    // test would pass even if the mask were dropped to `& 0`.
     var m = Machine.init(.{ .rng_seed = 0xDEADBEEFCAFEBABE });
     defer m.deinit();
-    try m.loadRom(&assemble(.{0xC50F}));
+    try m.loadRom(&assemble(.{ 0xC1FF, 0xC50F }));
 
     _ = m.step();
+    _ = m.step();
 
-    try std.testing.expectEqual(@as(u8, 0x00), m.cpu.v[0x5]);
+    try std.testing.expectEqual(@as(u8, 0x03), m.cpu.v[0x5]);
 }
 
 test "0NNN (non-00E0) is a silent no-op that only advances PC" {
