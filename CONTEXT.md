@@ -37,6 +37,10 @@ An 8-bit register that decrements at 60 Hz down to zero. Set via `FX18`. While n
 The 16-key hex input device. Keys are addressed `0x0`–`0xF`. ROMs poll via `EX9E` / `EXA1` and block-read via `FX0A`.
 _Avoid_: keyboard (which is the host input device translated by the frontend)
 
+**Awaited key**:
+The single-key claim slot `FX0A` uses to track its two-phase wait. Phase 1 (no claim): scan held **Keypad** keys, claim the lowest. Phase 2 (claim active): wait for that key's release. Pre-FX0A noise is discarded. Null between FX0A invocations. See ADR 0013.
+_Avoid_: latch, last-released, key buffer
+
 **Quirk**:
 A behavioral ambiguity in the original CHIP-8 spec where reference platforms or interpreters disagreed. Examples: which register sources the shift in `8XY6` / `8XYE`; whether `FX55` / `FX65` increments `I`; whether `BNNN` adds `V0` or `VX`. Captured per-instance in the `Quirks` config struct.
 

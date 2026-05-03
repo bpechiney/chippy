@@ -186,24 +186,12 @@ pub const Machine = struct {
                 0x07 => self.cpu.v[decode.opX(opcode)] = self.timing.delay_timer,
                 // Re-fetches next cycle on stall (no PC advance, no trace) — see ADR 0013.
                 0x0A => {
-                    if (self.keypad.awaiting_release == null) {
-                        for (0..16) |i| {
-                            const key: u4 = @intCast(i);
-                            if (self.keypad.isDown(key)) {
-                                self.keypad.awaiting_release = key;
-                                break;
-                            }
-                        }
+                    if (self.keypad.pollAwaitedKey()) |key| {
+                        self.cpu.v[decode.opX(opcode)] = key;
+                    } else {
                         self.cpu.pc = pre_pc;
                         return .waiting_for_key;
                     }
-                    const claimed = self.keypad.awaiting_release.?;
-                    if (self.keypad.isDown(claimed)) {
-                        self.cpu.pc = pre_pc;
-                        return .waiting_for_key;
-                    }
-                    self.cpu.v[decode.opX(opcode)] = claimed;
-                    self.keypad.awaiting_release = null;
                 },
                 0x15 => self.timing.delay_timer = self.cpu.v[decode.opX(opcode)],
                 0x1E => self.cpu.i +%= self.cpu.v[decode.opX(opcode)],
@@ -326,8 +314,7 @@ pub const Machine = struct {
         try writer.writeInt(u8, @as(u8, self.cpu.sp), .big);
         for (self.cpu.stack) |entry| try writer.writeInt(u16, entry, .big);
         for (self.framebuffer.pixels) |px| try writer.writeInt(u8, px, .big);
-        try writer.writeInt(u16, self.keypad.state, .big);
-        try writer.writeInt(u8, if (self.keypad.awaiting_release) |k| k else 0xFF, .big);
+        try self.keypad.serialize(writer);
         try writer.writeInt(u64, self.timing.cycles, .big);
         try writer.writeInt(u8, self.timing.delay_timer, .big);
         try writer.writeInt(u8, self.timing.sound_timer, .big);
@@ -341,9 +328,7 @@ pub const Machine = struct {
         self.cpu.sp = @truncate(try reader.takeByte());
         for (&self.cpu.stack) |*entry| entry.* = try reader.takeInt(u16, .big);
         for (&self.framebuffer.pixels) |*px| px.* = @intCast(try reader.takeByte());
-        self.keypad.state = try reader.takeInt(u16, .big);
-        const last = try reader.takeByte();
-        self.keypad.awaiting_release = if (last == 0xFF) null else @intCast(last);
+        self.keypad = try Keypad.deserialize(reader);
         self.timing.cycles = try reader.takeInt(u64, .big);
         self.timing.delay_timer = try reader.takeByte();
         self.timing.sound_timer = try reader.takeByte();
@@ -1342,7 +1327,7 @@ test "FX0A phase 1: no key held returns waiting_for_key with PC unchanged across
 
     try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
     try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0x5]);
-    try std.testing.expectEqual(@as(?u4, null), m.keypad.awaiting_release);
+    try std.testing.expect(!m.keypad.isAwaiting());
 }
 
 test "FX0A phase 1 → 2: lowest-indexed held key is claimed and the stall continues" {
@@ -1355,8 +1340,15 @@ test "FX0A phase 1 → 2: lowest-indexed held key is claimed and the stall conti
 
     try std.testing.expectEqual(StepResult.waiting_for_key, m.step());
 
-    try std.testing.expectEqual(@as(?u4, 0x3), m.keypad.awaiting_release);
+    try std.testing.expect(m.keypad.isAwaiting());
     try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
+
+    // Releasing 0x3 must satisfy the next step — proves 0x3 was claimed,
+    // not 0xA or 0xC (mirrors the Keypad-level lowest-claim test).
+    m.setKey(0x3, false);
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u8, 0x3), m.cpu.v[0x5]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
 test "FX0A phase 2 stall: claimed key still held — keeps stalling without advancing PC" {
@@ -1370,7 +1362,7 @@ test "FX0A phase 2 stall: claimed key still held — keeps stalling without adva
     try std.testing.expectEqual(StepResult.waiting_for_key, m.step());
     try std.testing.expectEqual(StepResult.waiting_for_key, m.step());
 
-    try std.testing.expectEqual(@as(?u4, 0x7), m.keypad.awaiting_release);
+    try std.testing.expect(m.keypad.isAwaiting());
     try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
     try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0x5]);
 }
@@ -1388,10 +1380,41 @@ test "FX0A phase 2 consume: claimed key released writes V[X] = K, clears claim, 
 
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
     try std.testing.expectEqual(@as(u8, 0x07), m.cpu.v[0x5]);
-    try std.testing.expectEqual(@as(?u4, null), m.keypad.awaiting_release);
+    try std.testing.expect(!m.keypad.isAwaiting());
 
     try std.testing.expectEqual(StepResult.waiting_for_key, m.step());
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX0A mid-stall: Machine.serialize/deserialize through the codec preserves the active claim" {
+    // Integration test for the Machine.serialize → Keypad.serialize delegation
+    // path with an active claim slot. Catches a delegation-wiring bug (wrong
+    // byte order, extra byte, off-by-one) that the Keypad-level codec test
+    // alone wouldn't surface.
+    var src = Machine.init(.{});
+    defer src.deinit();
+    try src.loadRom(&assemble(.{0xF50A}));
+    src.setKey(0x9, true);
+    try std.testing.expectEqual(StepResult.waiting_for_key, src.step());
+    try std.testing.expect(src.keypad.isAwaiting());
+
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    try src.serialize(&aw.writer);
+
+    var dst = Machine.init(.{});
+    defer dst.deinit();
+    var reader = std.Io.Reader.fixed(aw.written());
+    try dst.deserialize(&reader);
+
+    try std.testing.expect(dst.keypad.isAwaiting());
+
+    // Releasing 0x9 on the restored Machine must consume — proves the right
+    // key value survived the round-trip, not just the phase indicator.
+    dst.setKey(0x9, true);
+    dst.setKey(0x9, false);
+    try std.testing.expectEqual(StepResult.ran, dst.step());
+    try std.testing.expectEqual(@as(u8, 0x9), dst.cpu.v[0x5]);
 }
 
 test "runUntil breaks on waiting_for_key and propagates the variant" {
@@ -1432,7 +1455,7 @@ test "FX0A discards pre-fetch keypad noise — only keys held when FX0A is reach
 
     try std.testing.expectEqual(StepResult.waiting_for_key, m.step());
 
-    try std.testing.expectEqual(@as(?u4, null), m.keypad.awaiting_release);
+    try std.testing.expect(!m.keypad.isAwaiting());
     try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
 }
 
@@ -1620,7 +1643,6 @@ test "serialize and deserialize roundtrip preserves machine state set by M2.8/M2
     src.timing.cycles = 1234;
     src.timing.sound_timer = 9;
     src.keypad.state = 0x00A0;
-    src.keypad.awaiting_release = 0xC;
     src.framebuffer.set(10, 5, 1);
 
     var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
@@ -1644,7 +1666,6 @@ test "serialize and deserialize roundtrip preserves machine state set by M2.8/M2
     try std.testing.expectEqual(@as(u8, 7), dst.timing.delay_timer);
     try std.testing.expectEqual(@as(u8, 9), dst.timing.sound_timer);
     try std.testing.expectEqual(@as(u16, 0x00A0), dst.keypad.state);
-    try std.testing.expectEqual(@as(?u4, 0xC), dst.keypad.awaiting_release);
     try std.testing.expectEqual(@as(u1, 1), dst.framebuffer.get(10, 5));
 }
 
