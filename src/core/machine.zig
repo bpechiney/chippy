@@ -51,9 +51,18 @@ pub const Machine = struct {
         switch (opcode & 0xF000) {
             0x0000 => switch (opcode) {
                 0x00E0 => self.framebuffer.clear(),
+                0x00EE => {
+                    self.cpu.sp -%= 1;
+                    self.cpu.pc = self.cpu.stack[self.cpu.sp];
+                },
                 else => {},
             },
             0x1000 => self.cpu.pc = opcode & 0x0FFF,
+            0x2000 => {
+                self.cpu.stack[self.cpu.sp] = self.cpu.pc;
+                self.cpu.sp +%= 1;
+                self.cpu.pc = opcode & 0x0FFF;
+            },
             0x6000 => self.cpu.v[(opcode & 0x0F00) >> 8] = @truncate(opcode & 0x00FF),
             0x7000 => self.cpu.v[(opcode & 0x0F00) >> 8] +%= @truncate(opcode & 0x00FF),
             0xA000 => self.cpu.i = opcode & 0x0FFF,
@@ -120,7 +129,7 @@ pub const Machine = struct {
         try writer.writeAll(&self.cpu.v);
         try writer.writeInt(u16, self.cpu.i, .big);
         try writer.writeInt(u16, self.cpu.pc, .big);
-        try writer.writeInt(u8, self.cpu.sp, .big);
+        try writer.writeInt(u8, @as(u8, self.cpu.sp), .big);
         for (self.cpu.stack) |entry| try writer.writeInt(u16, entry, .big);
         for (self.framebuffer.pixels) |px| try writer.writeInt(u8, px, .big);
         try writer.writeInt(u16, self.keypad.state, .big);
@@ -135,7 +144,7 @@ pub const Machine = struct {
         try reader.readSliceAll(&self.cpu.v);
         self.cpu.i = try reader.takeInt(u16, .big);
         self.cpu.pc = try reader.takeInt(u16, .big);
-        self.cpu.sp = try reader.takeByte();
+        self.cpu.sp = @truncate(try reader.takeByte());
         for (&self.cpu.stack) |*entry| entry.* = try reader.takeInt(u16, .big);
         for (&self.framebuffer.pixels) |*px| px.* = @intCast(try reader.takeByte());
         self.keypad.state = try reader.takeInt(u16, .big);
@@ -321,6 +330,73 @@ test "DXYN advances PC by 2" {
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
+test "2NNN pushes PC + 2 onto the return stack and jumps to NNN" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    try m.loadRom(&assemble(.{0x2456}));
+    const pre_sp = m.cpu.sp;
+    const pre_pc = m.cpu.pc;
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x456), m.cpu.pc);
+    try std.testing.expectEqual(pre_sp + 1, m.cpu.sp);
+    try std.testing.expectEqual(pre_pc + 2, m.cpu.stack[pre_sp]);
+}
+
+test "00EE pops the return stack into PC and decrements sp" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.sp = 1;
+    m.cpu.stack[0] = 0x789;
+    try m.loadRom(&assemble(.{0x00EE}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x789), m.cpu.pc);
+    try std.testing.expectEqual(@as(u4, 0), m.cpu.sp);
+}
+
+test "2NNN followed by 00EE returns to the instruction after CALL with sp restored" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    try m.loadRom(&assemble(.{ 0x2204, 0x0000, 0x00EE }));
+    const pre_sp = m.cpu.sp;
+    const pre_pc = m.cpu.pc;
+
+    _ = m.step();
+    _ = m.step();
+
+    try std.testing.expectEqual(pre_pc + 2, m.cpu.pc);
+    try std.testing.expectEqual(pre_sp, m.cpu.sp);
+}
+
+test "2NNN beyond 16 deep wraps sp at 4 bits rather than panicking the host" {
+    // Vanilla COSMAC VIP semantics treat stack overflow as undefined; we follow
+    // CLAUDE.md rule 12 and wrap quietly instead of panicking on ROM input.
+    var m = Machine.init(.{});
+    defer m.deinit();
+    try m.loadRom(&assemble(.{ 0x2202, 0x2202 }));
+
+    var i: usize = 0;
+    while (i < 17) : (i += 1) _ = m.step();
+
+    try std.testing.expectEqual(@as(u4, 1), m.cpu.sp);
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.stack[0]);
+}
+
+test "00EE from sp=0 wraps sp at 4 bits rather than panicking the host" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.stack[15] = 0xABC;
+    try m.loadRom(&assemble(.{0x00EE}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u4, 15), m.cpu.sp);
+    try std.testing.expectEqual(@as(u16, 0xABC), m.cpu.pc);
+}
+
 test "0NNN (non-00E0) is a silent no-op that only advances PC" {
     var m = Machine.init(.{});
     defer m.deinit();
@@ -365,9 +441,8 @@ test "serialize and deserialize roundtrip preserves machine state" {
     defer src.deinit();
     src.cpu.v[0xA] = 0x55;
     src.cpu.i = 0x300;
-    src.cpu.pc = 0x250;
-    src.cpu.sp = 3;
-    src.cpu.stack[0] = 0x222;
+    try src.loadRom(&assemble(.{0x2456}));
+    _ = src.step();
     src.timing.cycles = 1234;
     src.timing.delay_timer = 7;
     src.timing.sound_timer = 9;
@@ -386,9 +461,9 @@ test "serialize and deserialize roundtrip preserves machine state" {
 
     try std.testing.expectEqual(@as(u8, 0x55), dst.cpu.v[0xA]);
     try std.testing.expectEqual(@as(u16, 0x300), dst.cpu.i);
-    try std.testing.expectEqual(@as(u16, 0x250), dst.cpu.pc);
-    try std.testing.expectEqual(@as(u8, 3), dst.cpu.sp);
-    try std.testing.expectEqual(@as(u16, 0x222), dst.cpu.stack[0]);
+    try std.testing.expectEqual(@as(u16, 0x456), dst.cpu.pc);
+    try std.testing.expectEqual(@as(u4, 1), dst.cpu.sp);
+    try std.testing.expectEqual(@as(u16, 0x202), dst.cpu.stack[0]);
     try std.testing.expectEqual(@as(Cycles, 1234), dst.timing.cycles);
     try std.testing.expectEqual(@as(u8, 7), dst.timing.delay_timer);
     try std.testing.expectEqual(@as(u8, 9), dst.timing.sound_timer);
