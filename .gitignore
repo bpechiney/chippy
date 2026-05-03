@@ -44,5 +44,8 @@ secrets.json
 # Claude Code worktrees
 .claude/worktrees/
 
+# Claude Code per-machine runtime locks (e.g. /schedule skill)
+.claude/scheduled_tasks.lock
+
 # Logs
 *.log
