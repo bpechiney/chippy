@@ -81,6 +81,29 @@ pub const Machine = struct {
             },
             0x6000 => self.cpu.v[(opcode & 0x0F00) >> 8] = @truncate(opcode & 0x00FF),
             0x7000 => self.cpu.v[(opcode & 0x0F00) >> 8] +%= @truncate(opcode & 0x00FF),
+            0x8000 => {
+                const x = (opcode & 0x0F00) >> 8;
+                const y = (opcode & 0x00F0) >> 4;
+                switch (opcode & 0x000F) {
+                    0x0 => self.cpu.v[x] = self.cpu.v[y],
+                    0x1 => {
+                        self.cpu.v[x] |= self.cpu.v[y];
+                        // M3: gate on Quirks.vf_reset_on_logical (vanilla = reset; see #38).
+                        if (self.options.quirks.vf_reset_on_logical) self.cpu.v[0xF] = 0;
+                    },
+                    0x2 => {
+                        self.cpu.v[x] &= self.cpu.v[y];
+                        // M3: gate on Quirks.vf_reset_on_logical (vanilla = reset; see #38).
+                        if (self.options.quirks.vf_reset_on_logical) self.cpu.v[0xF] = 0;
+                    },
+                    0x3 => {
+                        self.cpu.v[x] ^= self.cpu.v[y];
+                        // M3: gate on Quirks.vf_reset_on_logical (vanilla = reset; see #38).
+                        if (self.options.quirks.vf_reset_on_logical) self.cpu.v[0xF] = 0;
+                    },
+                    else => {},
+                }
+            },
             0x9000 => switch (opcode & 0x000F) {
                 0x0 => if (self.cpu.v[(opcode & 0x0F00) >> 8] != self.cpu.v[(opcode & 0x00F0) >> 4]) {
                     self.cpu.pc +%= 2;
@@ -533,6 +556,97 @@ test "9XY1 (non-zero low nibble) is a silent no-op that only advances PC" {
     try std.testing.expectEqual(StepResult.ran, m.step());
 
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY0 copies VY into VX and leaves other registers untouched" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x11;
+    m.cpu.v[0x1] = 0x22;
+    m.cpu.v[0x3] = 0x33;
+    m.cpu.v[0xA] = 0x77;
+    m.cpu.v[0xF] = 0xCC;
+    try m.loadRom(&assemble(.{0x83A0}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x77), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0x77), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 0x11), m.cpu.v[0x0]);
+    try std.testing.expectEqual(@as(u8, 0x22), m.cpu.v[0x1]);
+    try std.testing.expectEqual(@as(u8, 0xCC), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY1 ORs VY into VX and resets VF to 0 even when VF was non-zero" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0b1010_0101;
+    m.cpu.v[0xA] = 0b0110_1100;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A1}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b1110_1101), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0b0110_1100), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY2 ANDs VY into VX and resets VF to 0 even when VF was non-zero" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0b1010_0101;
+    m.cpu.v[0xA] = 0b0110_1100;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A2}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b0010_0100), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0b0110_1100), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY3 XORs VY into VX and resets VF to 0 even when VF was non-zero" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0b1010_0101;
+    m.cpu.v[0xA] = 0b0110_1100;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A3}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b1100_1001), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0b0110_1100), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XYN with non-canonical low nibble is a silent no-op that only advances PC" {
+    // 0x8 / 0x9 / 0xA / 0xB / 0xC / 0xD / 0xF are not vanilla 8XYN ops at M2 —
+    // 8XY4-8XY7 and 8XYE land in M2.5/M2.6, but 8XY8/9/A/B/C/D/F never become
+    // canonical encodings in the vanilla VIP ISA. ROMs containing them must
+    // not panic the host (CLAUDE.md rule 12) and must not perturb V or VF.
+    const non_canonical = [_]u16{ 0x83A8, 0x83A9, 0x83AA, 0x83AB, 0x83AC, 0x83AD, 0x83AF };
+    inline for (non_canonical) |op| {
+        var m = Machine.init(.{});
+        defer m.deinit();
+        m.cpu.v[0x3] = 0xAB;
+        m.cpu.v[0xA] = 0xCD;
+        m.cpu.v[0xF] = 0xEF;
+        try m.loadRom(&assemble(.{op}));
+
+        try std.testing.expectEqual(StepResult.ran, m.step());
+
+        try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0x3]);
+        try std.testing.expectEqual(@as(u8, 0xCD), m.cpu.v[0xA]);
+        try std.testing.expectEqual(@as(u8, 0xEF), m.cpu.v[0xF]);
+        try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    }
 }
 
 test "0NNN (non-00E0) is a silent no-op that only advances PC" {

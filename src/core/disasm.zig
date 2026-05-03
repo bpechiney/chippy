@@ -53,6 +53,29 @@ pub fn disasm(opcode: u16) DisasmEntry {
             .x = @intCast((opcode & 0x0F00) >> 8),
             .nn = @truncate(opcode & 0x00FF),
         },
+        0x8000 => switch (opcode & 0x000F) {
+            0x0 => .{
+                .mnemonic = "LD VX, VY",
+                .x = @intCast((opcode & 0x0F00) >> 8),
+                .y = @intCast((opcode & 0x00F0) >> 4),
+            },
+            0x1 => .{
+                .mnemonic = "OR VX, VY",
+                .x = @intCast((opcode & 0x0F00) >> 8),
+                .y = @intCast((opcode & 0x00F0) >> 4),
+            },
+            0x2 => .{
+                .mnemonic = "AND VX, VY",
+                .x = @intCast((opcode & 0x0F00) >> 8),
+                .y = @intCast((opcode & 0x00F0) >> 4),
+            },
+            0x3 => .{
+                .mnemonic = "XOR VX, VY",
+                .x = @intCast((opcode & 0x0F00) >> 8),
+                .y = @intCast((opcode & 0x00F0) >> 4),
+            },
+            else => DisasmEntry.unknown,
+        },
         0x9000 => switch (opcode & 0x000F) {
             0x0 => .{
                 .mnemonic = "SNE VX, VY",
@@ -147,6 +170,39 @@ test "disasm(0x53A0) returns SE VX, VY with x and y populated" {
     try std.testing.expectEqualStrings("SE VX, VY", e.mnemonic);
     try std.testing.expectEqual(@as(u4, 0x3), e.x);
     try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0x83A0) returns LD VX, VY with x and y populated" {
+    const e = disasm(0x83A0);
+    try std.testing.expectEqualStrings("LD VX, VY", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+    try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0x83A1) returns OR VX, VY with x and y populated" {
+    const e = disasm(0x83A1);
+    try std.testing.expectEqualStrings("OR VX, VY", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+    try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0x83A2) returns AND VX, VY with x and y populated" {
+    const e = disasm(0x83A2);
+    try std.testing.expectEqualStrings("AND VX, VY", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+    try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0x83A3) returns XOR VX, VY with x and y populated" {
+    const e = disasm(0x83A3);
+    try std.testing.expectEqualStrings("XOR VX, VY", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+    try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0x83A8) returns the unknown sentinel for non-canonical 8XYN low nibble" {
+    const e = disasm(0x83A8);
+    try std.testing.expectEqualStrings("???", e.mnemonic);
 }
 
 test "disasm(0x93A0) returns SNE VX, VY with x and y populated" {
