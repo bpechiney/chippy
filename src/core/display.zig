@@ -3,11 +3,11 @@
 
 const std = @import("std");
 
-pub const WIDTH: usize = 64;
-pub const HEIGHT: usize = 32;
-pub const PIXELS: usize = WIDTH * HEIGHT;
-
 pub const Framebuffer = struct {
+    pub const WIDTH: usize = 64;
+    pub const HEIGHT: usize = 32;
+    pub const PIXELS: usize = WIDTH * HEIGHT;
+
     pixels: [PIXELS]u1 = [_]u1{0} ** PIXELS,
 
     pub fn clear(self: *Framebuffer) void {
@@ -62,7 +62,7 @@ test "xorSprite: 1-byte sprite at (0,0) on a clear framebuffer lights the 8 expe
     for (expected, 0..) |bit, col| {
         try std.testing.expectEqual(bit, fb.get(col, 0));
     }
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 1));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 1));
 }
 
 test "xorSprite: drawing the same sprite twice at the same location erases it and reports a collision" {
@@ -73,7 +73,7 @@ test "xorSprite: drawing the same sprite twice at the same location erases it an
     const collided = fb.xorSprite(0, 0, &sprite, false);
 
     try std.testing.expectEqual(true, collided);
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
 }
 
 test "xorSprite: a zero sprite-bit over a lit framebuffer pixel does not report a collision or clear the pixel" {
@@ -110,9 +110,9 @@ test "xorSprite: a sprite at x=60 clips at the right edge — only the leftmost 
     const collided = fb.xorSprite(60, 0, &sprite, false);
 
     try std.testing.expectEqual(false, collided);
-    for (60..WIDTH) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 0));
+    for (60..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 0));
     // Pixels that would have wrapped onto row 1 must remain clear.
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 1));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 1));
 }
 
 test "xorSprite: a height-4 sprite at y=30 clips at the bottom edge — only the top 2 rows are written" {
@@ -126,7 +126,7 @@ test "xorSprite: a height-4 sprite at y=30 clips at the bottom edge — only the
     for (0..8) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 31));
     // Rows 32–33 don't exist; assert nothing was written by checking row 0 and the
     // far end of the framebuffer remain clear (a wrap into row 0 would surface here).
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
 }
 
 test "xorSprite: starting (x, y) is reduced modulo the screen dimensions before drawing" {
@@ -142,8 +142,8 @@ test "xorSprite: starting (x, y) is reduced modulo the screen dimensions before 
     try std.testing.expectEqual(@as(u1, 0), fb.get(9, 1));
     // The unwrapped destination row (33) doesn't exist; the wrapped row (1) is the
     // only row that should have changed. Confirm row 0 and row 2 are untouched.
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 2));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 2));
 }
 
 test "xorSprite: wrap=true at x=60 wraps the rightmost 4 columns to columns 0-3 of the same row" {
@@ -153,11 +153,11 @@ test "xorSprite: wrap=true at x=60 wraps the rightmost 4 columns to columns 0-3 
     const collided = fb.xorSprite(60, 0, &sprite, true);
 
     try std.testing.expectEqual(false, collided);
-    for (60..WIDTH) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 0));
+    for (60..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 0));
     for (0..4) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 0));
     // Pixels 4-59 of row 0 untouched; row 1 untouched.
     for (4..60) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 1));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 1));
 }
 
 test "xorSprite: wrap=true with a height-4 sprite at y=30 wraps rows 32-33 onto rows 0-1" {
@@ -172,8 +172,8 @@ test "xorSprite: wrap=true with a height-4 sprite at y=30 wraps rows 32-33 onto 
     for (0..8) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 0));
     for (0..8) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 1));
     // Row 2 untouched; far-right of row 0 untouched.
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 2));
-    for (8..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 2));
+    for (8..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
 }
 
 test "xorSprite: wrap=true at x=60 y=30 with a 2x2 sprite wraps both axes simultaneously" {
@@ -185,16 +185,16 @@ test "xorSprite: wrap=true at x=60 y=30 with a 2x2 sprite wraps both axes simult
 
     try std.testing.expectEqual(false, collided);
     // Row 30 — vanilla columns 60-63 + wrapped columns 0-3.
-    for (60..WIDTH) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 30));
+    for (60..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 30));
     for (0..4) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 30));
     // Row 31 — same.
-    for (60..WIDTH) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 31));
+    for (60..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 31));
     for (0..4) |col| try std.testing.expectEqual(@as(u1, 1), fb.get(col, 31));
     // Pixels 4-59 of rows 30 and 31 untouched; row 0 and row 1 untouched (only Y
     // overflow would land there, but this sprite is 2 rows starting at 30, so
     // it stays inside Y bounds).
     for (4..60) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 30));
     for (4..60) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 31));
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
-    for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 1));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
+    for (0..Framebuffer.WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 1));
 }

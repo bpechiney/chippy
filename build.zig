@@ -38,7 +38,21 @@ pub fn build(b: *std.Build) void {
     const frontend_tests = b.addTest(.{ .root_module = exe_mod });
     const run_frontend_tests = b.addRunArtifact(frontend_tests);
 
+    // Integration tests live in their own module so `chippy_core` internals
+    // are unreachable; the public surface is the literal integration-test
+    // surface (ADR 0014).
+    const integration_mod = b.createModule(.{
+        .root_source_file = b.path("tests/integration/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    integration_mod.addImport("chippy_core", core_mod);
+
+    const integration_tests = b.addTest(.{ .root_module = integration_mod });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_core_tests.step);
     test_step.dependOn(&run_frontend_tests.step);
+    test_step.dependOn(&run_integration_tests.step);
 }

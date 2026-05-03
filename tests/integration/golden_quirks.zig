@@ -25,7 +25,7 @@
 //! is a 2× safety margin, matching the corax+ test's cycle count for
 //! pattern consistency. Test runtime is sub-millisecond.
 
-const Machine = @import("machine.zig").Machine;
+const Machine = @import("chippy_core").Machine;
 const harness = @import("golden_harness.zig");
 
 const ROM_PATH = "tests/test_roms/quirks.ch8";

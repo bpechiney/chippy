@@ -1,7 +1,7 @@
 //! Test-only scripted-keypad-with-framebuffer-checkpoints helper for the
-//! `6-keypad.ch8` golden (ADR 0013). Lives next to `chippy_core` but is
-//! *not* re-exported via `root.zig` — it's a test-side utility, not part
-//! of the public surface.
+//! `6-keypad.ch8` golden (ADR 0013). Lives in the integration-test module
+//! and reaches `Machine`, `Framebuffer`, and `assemble` only via
+//! `chippy_core`'s public API — never `src/core/` internals.
 //!
 //! The helper is justified only because `6-keypad.ch8` is a real second
 //! caller for "drive a `Machine` through a multi-event keypad timeline with
@@ -13,8 +13,9 @@
 //! cover the scheduler's contract before the 6-keypad ROM uses it).
 
 const std = @import("std");
-const Machine = @import("machine.zig").Machine;
-const Framebuffer = @import("display.zig").Framebuffer;
+const chippy = @import("chippy_core");
+const Machine = chippy.Machine;
+const Framebuffer = chippy.Framebuffer;
 const harness = @import("golden_harness.zig");
 
 const PACKED_BYTES = harness.PACKED_BYTES;
@@ -143,7 +144,7 @@ fn driveTo(m: *Machine, target_cycle: u64) !void {
     }
 }
 
-const assemble = @import("assemble.zig").assemble;
+const assemble = chippy.assemble;
 
 test "runScripted: zero-event/zero-checkpoint timeline returns immediately on a fresh machine" {
     var m = Machine.init(.{});
