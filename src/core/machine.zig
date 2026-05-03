@@ -53,6 +53,10 @@ pub const Machine = struct {
                 0x00E0 => self.framebuffer.clear(),
                 else => {},
             },
+            0x1000 => self.cpu.pc = opcode & 0x0FFF,
+            0x6000 => self.cpu.v[(opcode & 0x0F00) >> 8] = @truncate(opcode & 0x00FF),
+            0x7000 => self.cpu.v[(opcode & 0x0F00) >> 8] +%= @truncate(opcode & 0x00FF),
+            0xA000 => self.cpu.i = opcode & 0x0FFF,
             else => {},
         }
         return .ran;
@@ -196,6 +200,64 @@ test "00E0 clears the framebuffer and advances PC by 2" {
 
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
     for (m.framebuffer.pixels) |px| try std.testing.expectEqual(@as(u1, 0), px);
+}
+
+test "1NNN sets PC to NNN" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    try m.loadRom(&assemble(.{0x1456}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u16, 0x456), m.cpu.pc);
+}
+
+test "6XNN loads NN into VX, advances PC, leaves other registers untouched" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x99;
+    m.cpu.i = 0x321;
+    try m.loadRom(&assemble(.{0x6A42}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u8, 0x42), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    try std.testing.expectEqual(@as(u8, 0x99), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u16, 0x321), m.cpu.i);
+}
+
+test "7XNN adds NN to VX without touching VF (no wrap)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x5] = 0x10;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x7505}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u8, 0x15), m.cpu.v[0x5]);
+    try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "7XNN wraps at 8 bits without touching VF" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0xFF;
+    m.cpu.v[0xF] = 0x55;
+    try m.loadRom(&assemble(.{0x7001}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u8, 0x00), m.cpu.v[0x0]);
+    try std.testing.expectEqual(@as(u8, 0x55), m.cpu.v[0xF]);
+}
+
+test "ANNN loads NNN into I and advances PC" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    try m.loadRom(&assemble(.{0xA789}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u16, 0x789), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
 test "0NNN (non-00E0) is a silent no-op that only advances PC" {
