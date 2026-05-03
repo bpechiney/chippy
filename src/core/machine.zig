@@ -198,6 +198,7 @@ pub const Machine = struct {
                     }
                 },
                 0x15 => self.timing.delay_timer = self.cpu.v[decode.opX(opcode)],
+                0x18 => self.timing.sound_timer = self.cpu.v[decode.opX(opcode)],
                 0x1E => self.cpu.i +%= self.cpu.v[decode.opX(opcode)],
                 0x29 => self.cpu.i = FONTSET_ADDRESS + FONT_GLYPH_BYTES * @as(u16, self.cpu.v[decode.opX(opcode)] & 0x0F),
                 0x33 => {
@@ -1565,22 +1566,47 @@ test "FX29 points I at the 5-byte fontset glyph for each hex digit 0..F" {
     }
 }
 
-test "FX18 falls through silently — advances PC, leaves V/I/timers untouched (sound timer set lands in M5)" {
+test "FX18 stores VX into the sound timer" {
     var m = Machine.init(.{});
     defer m.deinit();
-    m.cpu.v[0x3] = 0x77;
-    m.cpu.i = 0x321;
-    m.timing.sound_timer = 0xAA;
+    m.cpu.v[0x3] = 99;
+    m.timing.sound_timer = 0;
     m.timing.delay_timer = 0xBB;
     try m.loadRom(&assemble(.{0xF318}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
-    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
-    try std.testing.expectEqual(@as(u8, 0x77), m.cpu.v[0x3]);
-    try std.testing.expectEqual(@as(u16, 0x321), m.cpu.i);
-    try std.testing.expectEqual(@as(u8, 0xAA), m.timing.sound_timer);
+    try std.testing.expectEqual(@as(u8, 99), m.timing.sound_timer);
+    try std.testing.expectEqual(@as(u8, 99), m.cpu.v[0x3]);
     try std.testing.expectEqual(@as(u8, 0xBB), m.timing.delay_timer);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX18 then tickTimers then isBeeping observes the 60 Hz decrement through the ROM-visible interface" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 2;
+    try m.loadRom(&assemble(.{0xF318}));
+
+    _ = m.step();
+    try std.testing.expect(m.isBeeping());
+    m.tickTimers();
+    try std.testing.expect(m.isBeeping());
+    m.tickTimers();
+    try std.testing.expect(!m.isBeeping());
+}
+
+test "FX18 with V[X] = 0 leaves isBeeping false (vanilla VIP — store, not OR)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0;
+    m.timing.sound_timer = 7;
+    try m.loadRom(&assemble(.{0xF318}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0), m.timing.sound_timer);
+    try std.testing.expect(!m.isBeeping());
 }
 
 test "FX29 ignores the high nibble of VX (digit selected from low 4 bits only)" {
