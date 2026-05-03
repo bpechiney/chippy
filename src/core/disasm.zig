@@ -4,6 +4,7 @@
 //! lands on `.unknown`.
 
 const std = @import("std");
+const decode = @import("decode.zig");
 
 pub const DisasmEntry = struct {
     mnemonic: []const u8,
@@ -21,75 +22,75 @@ pub fn disasm(opcode: u16) DisasmEntry {
         0x0000 => switch (opcode) {
             0x00E0 => .{ .mnemonic = "CLS" },
             0x00EE => .{ .mnemonic = "RET" },
-            else => .{ .mnemonic = "SYS NNN", .nnn = opcode & 0x0FFF },
+            else => .{ .mnemonic = "SYS NNN", .nnn = decode.opNNN(opcode) },
         },
-        0x1000 => .{ .mnemonic = "JP NNN", .nnn = opcode & 0x0FFF },
-        0x2000 => .{ .mnemonic = "CALL NNN", .nnn = opcode & 0x0FFF },
+        0x1000 => .{ .mnemonic = "JP NNN", .nnn = decode.opNNN(opcode) },
+        0x2000 => .{ .mnemonic = "CALL NNN", .nnn = decode.opNNN(opcode) },
         0x3000 => .{
             .mnemonic = "SE VX, NN",
-            .x = @intCast((opcode & 0x0F00) >> 8),
-            .nn = @truncate(opcode & 0x00FF),
+            .x = decode.opX(opcode),
+            .nn = decode.opNN(opcode),
         },
         0x4000 => .{
             .mnemonic = "SNE VX, NN",
-            .x = @intCast((opcode & 0x0F00) >> 8),
-            .nn = @truncate(opcode & 0x00FF),
+            .x = decode.opX(opcode),
+            .nn = decode.opNN(opcode),
         },
-        0x5000 => switch (opcode & 0x000F) {
+        0x5000 => switch (decode.opN(opcode)) {
             0x0 => .{
                 .mnemonic = "SE VX, VY",
-                .x = @intCast((opcode & 0x0F00) >> 8),
-                .y = @intCast((opcode & 0x00F0) >> 4),
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
             },
             else => DisasmEntry.unknown,
         },
         0x6000 => .{
             .mnemonic = "LD VX, NN",
-            .x = @intCast((opcode & 0x0F00) >> 8),
-            .nn = @truncate(opcode & 0x00FF),
+            .x = decode.opX(opcode),
+            .nn = decode.opNN(opcode),
         },
         0x7000 => .{
             .mnemonic = "ADD VX, NN",
-            .x = @intCast((opcode & 0x0F00) >> 8),
-            .nn = @truncate(opcode & 0x00FF),
+            .x = decode.opX(opcode),
+            .nn = decode.opNN(opcode),
         },
-        0x8000 => switch (opcode & 0x000F) {
+        0x8000 => switch (decode.opN(opcode)) {
             0x0 => .{
                 .mnemonic = "LD VX, VY",
-                .x = @intCast((opcode & 0x0F00) >> 8),
-                .y = @intCast((opcode & 0x00F0) >> 4),
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
             },
             0x1 => .{
                 .mnemonic = "OR VX, VY",
-                .x = @intCast((opcode & 0x0F00) >> 8),
-                .y = @intCast((opcode & 0x00F0) >> 4),
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
             },
             0x2 => .{
                 .mnemonic = "AND VX, VY",
-                .x = @intCast((opcode & 0x0F00) >> 8),
-                .y = @intCast((opcode & 0x00F0) >> 4),
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
             },
             0x3 => .{
                 .mnemonic = "XOR VX, VY",
-                .x = @intCast((opcode & 0x0F00) >> 8),
-                .y = @intCast((opcode & 0x00F0) >> 4),
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
             },
             else => DisasmEntry.unknown,
         },
-        0x9000 => switch (opcode & 0x000F) {
+        0x9000 => switch (decode.opN(opcode)) {
             0x0 => .{
                 .mnemonic = "SNE VX, VY",
-                .x = @intCast((opcode & 0x0F00) >> 8),
-                .y = @intCast((opcode & 0x00F0) >> 4),
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
             },
             else => DisasmEntry.unknown,
         },
-        0xA000 => .{ .mnemonic = "LD I, NNN", .nnn = opcode & 0x0FFF },
+        0xA000 => .{ .mnemonic = "LD I, NNN", .nnn = decode.opNNN(opcode) },
         0xD000 => .{
             .mnemonic = "DRW VX, VY, N",
-            .x = @intCast((opcode & 0x0F00) >> 8),
-            .y = @intCast((opcode & 0x00F0) >> 4),
-            .n = @intCast(opcode & 0x000F),
+            .x = decode.opX(opcode),
+            .y = decode.opY(opcode),
+            .n = decode.opN(opcode),
         },
         else => DisasmEntry.unknown,
     };
