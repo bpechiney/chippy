@@ -65,9 +65,9 @@ Wraps the per-PR loop. See ADR 0007.
 1. Pick `ready-for-agent` sub-issue. Branch `N-slug` from latest `origin/master`. Enforced mechanically: a project-level PreToolUse hook (ADR 0011) blocks `Edit`/`Write`/`MultiEdit` while on `master` and while on a branch whose upstream is `[gone]` (already merged). Post-merge cleanup — checkout master, fetch, pull --rebase, delete the merged branch — runs automatically via PostToolUse on `gh pr merge` and via SessionStart on every fresh-context boundary (`startup`, `resume`, `clear`).
 2. Implement via `/tdd` — tracer-bullet red-green-refactor against the public surface declared in the agent brief. Tests and code land in the same commit. Test the real `Bus` / `Cpu` / `Machine` (rule 11). If the first failing test forces a contract decision the PRD did not make, stop and sharpen the PRD before continuing — that is the ambiguity signal, not a cue to keep coding. Enforced mechanically: a project-level PreToolUse hook (ADR 0009) blocks `Edit`/`Write`/`MultiEdit` on `src/**` while on an issue branch until `/tdd` is invoked in the current session.
 3. `/simplify` on the diff.
-4. `/commit`.
-5. `/commit-push-pr`.
-6. `/review` (or the `feature-dev:code-reviewer` agent) for cold-read review. Per rule 13, defer a flagged gap only with an evidence-grounded argument that it isn't real.
+4. `/commit-push-pr` — opens the PR. Use `/commit` + `git push` for any subsequent commits on the branch.
+5. `/code-review:code-review` for cold-read review. Per rule 13, defer a flagged gap only with an evidence-grounded argument that it isn't real.
+6. **Lessons gate.** Explicitly ask: did this PR teach the next emulator anything non-obvious — a trap, a shape, a procedure? If yes, append a bullet to `docs/next-target-handoff.md`, `/commit` + `git push` to the PR branch, re-await CI. The bullet ships in the same PR as the work that motivated it; a docs-only follow-up PR is a workflow violation, not a fallback. If no lesson emerged, no commit — proceed to step 7.
 7. CI green on `ubuntu-latest` ∩ `macos-latest`.
 8. Merge.
 
@@ -84,7 +84,7 @@ Wraps the per-PR loop. See ADR 0007.
 
 ## Lessons capture
 
-- Per-PR close: if a non-obvious lesson emerged, append a bullet to `docs/next-target-handoff.md` *now*. Don't defer.
+- **Per-PR close: lessons ship in the same PR, never a follow-up.** Per-PR-loop step 6 is the explicit gate. If a non-obvious lesson emerged, the bullet on `docs/next-target-handoff.md` lands as a commit on the PR branch *before* merge. A docs-only follow-up PR is a workflow violation — not a fallback for "I forgot."
 - Per-milestone close: write `docs/retros/MN.md` (≤ 1 page). Promote next-emulator-bound bullets to handoff with back-reference.
 - On architecture reversal: new ADR + retro/handoff update.
 - `docs/retros/MN.md` is **frozen after write** — never edit; supersede if needed.
