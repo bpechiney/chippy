@@ -131,6 +131,7 @@ pub fn disasm(opcode: u16) DisasmEntry {
         0xF000 => switch (decode.opNN(opcode)) {
             0x07 => .{ .mnemonic = "LD VX, DT", .x = decode.opX(opcode) },
             0x15 => .{ .mnemonic = "LD DT, VX", .x = decode.opX(opcode) },
+            0x18 => .{ .mnemonic = "LD ST, VX", .x = decode.opX(opcode) },
             0x1E => .{ .mnemonic = "ADD I, VX", .x = decode.opX(opcode) },
             0x29 => .{ .mnemonic = "LD F, VX", .x = decode.opX(opcode) },
             0x33 => .{ .mnemonic = "LD B, VX", .x = decode.opX(opcode) },
@@ -348,9 +349,10 @@ test "disasm(0xF329) returns LD F, VX with x populated" {
     try std.testing.expectEqual(@as(u4, 0x3), e.x);
 }
 
-test "disasm(0xF318) returns the unknown sentinel (FX18 lands in M5)" {
+test "disasm(0xF318) returns LD ST, VX with x populated" {
     const e = disasm(0xF318);
-    try std.testing.expectEqualStrings("???", e.mnemonic);
+    try std.testing.expectEqualStrings("LD ST, VX", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
 }
 
 test "disasm(0xF333) returns LD B, VX with x populated" {
