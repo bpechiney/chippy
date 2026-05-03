@@ -13,7 +13,7 @@ const Framebuffer = @import("display.zig").Framebuffer;
 const display = @import("display.zig");
 const bus_mod = @import("bus.zig");
 
-const PACKED_BYTES: usize = display.PIXELS / 8;
+pub const PACKED_BYTES: usize = display.PIXELS / 8;
 
 pub const RunMode = union(enum) {
     cycles: u32,
@@ -62,7 +62,9 @@ pub fn runAndCompare(opts: RunOptions) !void {
 }
 
 // Row-major, MSB = leftmost so a hex dump of the snapshot reads like the screen.
-fn packFramebuffer(fb: *const Framebuffer) [PACKED_BYTES]u8 {
+// Reused by `scripted_input.zig` to compare per-checkpoint framebuffers in
+// the keypad-input multi-checkpoint test (ADR 0004 + issue #80).
+pub fn packFramebuffer(fb: *const Framebuffer) [PACKED_BYTES]u8 {
     var out: [PACKED_BYTES]u8 = [_]u8{0} ** PACKED_BYTES;
     for (0..display.HEIGHT) |row| {
         for (0..display.WIDTH / 8) |byte_col| {
@@ -77,7 +79,7 @@ fn packFramebuffer(fb: *const Framebuffer) [PACKED_BYTES]u8 {
     return out;
 }
 
-fn updateGoldensRequested() bool {
+pub fn updateGoldensRequested() bool {
     const v = std.testing.environ.getPosix("UPDATE_GOLDENS") orelse return false;
     return std.mem.eql(u8, v, "1");
 }

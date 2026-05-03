@@ -24,6 +24,48 @@ verify. Two kinds live here:
   determinism via the captured `.bin` carries the regression load
   forward; provenance + SHA-256 below preserve the audit chain.
 
+## `keypad-menu.png`, `keypad-down.png`, `keypad-up.png`, `keypad-getkey.png`
+
+- **Source:** `pictures/keypad-menu.png`, `pictures/keypad-down.png`,
+  `pictures/keypad-up.png`, `pictures/keypad-getkey.png` from
+  [Timendus/chip8-test-suite](https://github.com/Timendus/chip8-test-suite),
+  retrieved 2026-05-03.
+- **License:** GPL-3.0, matching this repo's own license.
+- **Sizes (file / image):**
+  - `keypad-menu.png` 10 096 bytes; 768 × 384 RGBA (clean 12× upscale of the 64 × 32 framebuffer).
+  - `keypad-down.png` 8 734 bytes; 768 × 384 RGBA.
+  - `keypad-up.png` 9 487 bytes; 768 × 384 RGBA.
+  - `keypad-getkey.png` 7 583 bytes; 768 × 384 RGBA.
+- **SHA-256:**
+  - `keypad-menu.png`: `41d4dacccd9b0a9269293a48690d8a1e69b816288ea5098f346129e739f27824`
+  - `keypad-down.png`: `90174c687395e23e2a396b5ebbde6d5beabec7f4726cd9da3a53ca84ee0924bb`
+  - `keypad-up.png`: `688bd7d38fec56cabed3149791d2fbd8808b3f098e0544330b92eb5cda4b7a14`
+  - `keypad-getkey.png`: `9dac01edb017a1c383a0eb67a35fbc2f2654525ee91b9b2ce45cd059fc5dbc41`
+- **Represents — which checkpoint of the scripted timeline:**
+  - `keypad-menu.png` — the boot menu after `pokeRam(0x1FF, 0)`, with
+    the blinking cursor visible next to "1 EX9E DOWN" (the
+    `MENU_CYCLES = 2000` checkpoint pins the cursor-visible blink
+    phase). Anchors `keypad_menu_after_2000_cycles.bin`.
+  - `keypad-down.png` — the EX9E (`keypad-down`) subtest after
+    `pokeRam(0x1FF, 1)` with keys 1 and 6 held — cursor sprites
+    appear over key cells 1 and 6 (the only cells where SKP fires
+    with the current keypad state). Anchors
+    `keypad_down_after_2000_cycles.bin`.
+  - `keypad-up.png` — the EXA1 (`keypad-up`) subtest after
+    `pokeRam(0x1FF, 2)` with keys 1 and 6 held — cursor sprites
+    appear over every key cell *except* 1 and 6 (SKNP fires for
+    every cell whose key is up). Anchors
+    `keypad_up_after_5000_cycles.bin`.
+  - `keypad-getkey.png` — the FX0A (`keypad-getkey`) subtest after
+    `pokeRam(0x1FF, 3)` and a scripted press@cycle 350 / release@cycle 400
+    sequence; the screen shows "ALL GOOD" + checkmark while the ROM
+    blocks on its second FX0A. Anchors
+    `keypad_getkey_after_5000_cycles.bin`.
+- **Reviewer eyeball-gate:** each captured `.bin` was verified against
+  its reference PNG at PR review time at 0/2048 px diff (sample-center
+  downsampling at 12×). Cross-runner determinism via the captured
+  `.bin` carries the regression load forward.
+
 ## `quirks.png`
 
 - **Source:** `pictures/quirks.png` from

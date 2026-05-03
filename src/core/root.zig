@@ -38,4 +38,6 @@ test {
     _ = @import("golden_ibm_logo.zig");
     _ = @import("golden_corax_plus.zig");
     _ = @import("golden_quirks.zig");
+    _ = @import("scripted_input.zig");
+    _ = @import("golden_keypad.zig");
 }
