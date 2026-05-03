@@ -166,6 +166,28 @@ pub const Machine = struct {
                 0x15 => self.timing.delay_timer = self.cpu.v[decode.opX(opcode)],
                 0x1E => self.cpu.i +%= self.cpu.v[decode.opX(opcode)],
                 0x29 => self.cpu.i = FONTSET_ADDRESS + FONT_GLYPH_BYTES * @as(u16, self.cpu.v[decode.opX(opcode)] & 0x0F),
+                0x33 => {
+                    const vx = self.cpu.v[decode.opX(opcode)];
+                    self.bus.write8(self.cpu.i, vx / 100);
+                    self.bus.write8(self.cpu.i +% 1, (vx / 10) % 10);
+                    self.bus.write8(self.cpu.i +% 2, vx % 10);
+                },
+                0x55 => {
+                    const x = decode.opX(opcode);
+                    for (0..@as(usize, x) + 1) |j| {
+                        self.bus.write8(self.cpu.i +% @as(u16, @intCast(j)), self.cpu.v[j]);
+                    }
+                    // M3: gate on Quirks.no_index_increment (vanilla = I += X + 1; see #56).
+                    self.cpu.i +%= @as(u16, x) + 1;
+                },
+                0x65 => {
+                    const x = decode.opX(opcode);
+                    for (0..@as(usize, x) + 1) |j| {
+                        self.cpu.v[j] = self.bus.read8(self.cpu.i +% @as(u16, @intCast(j)));
+                    }
+                    // M3: gate on Quirks.no_index_increment (vanilla = I += X + 1; see #56).
+                    self.cpu.i +%= @as(u16, x) + 1;
+                },
                 else => {},
             },
             else => {},
@@ -1152,16 +1174,21 @@ test "serialize and deserialize roundtrip preserves a live IBM-logo framebuffer"
     try std.testing.expectEqualSlices(u1, &src.framebuffer.pixels, &dst.framebuffer.pixels);
 }
 
-test "serialize and deserialize roundtrip preserves machine state set by M2.8 timer/I opcodes" {
-    // delay_timer and I are populated via FX15 / FX1E rather than hand-set so
-    // the roundtrip is exercised against state the ROM actually produces.
+test "serialize and deserialize roundtrip preserves machine state set by M2.8/M2.9 timer/I/store opcodes" {
+    // delay_timer, I, and the FX55-written RAM bytes are populated via the
+    // ROM-visible interface rather than hand-set so the roundtrip is exercised
+    // against state the ROM actually produces.
     var src = Machine.init(.{ .rng_seed = 42 });
     defer src.deinit();
+    src.cpu.v[0x0] = 0xC0;
+    src.cpu.v[0x1] = 0xC1;
+    src.cpu.v[0x2] = 0xC2;
     src.cpu.v[0xA] = 0x55;
     src.cpu.v[0x3] = 7;
     src.cpu.v[0x4] = 0x05;
     src.cpu.i = 0x300;
-    try src.loadRom(&assemble(.{ 0xF315, 0xF41E, 0x2456 }));
+    try src.loadRom(&assemble(.{ 0xF315, 0xF41E, 0xF255, 0x2456 }));
+    _ = src.step();
     _ = src.step();
     _ = src.step();
     _ = src.step();
@@ -1181,14 +1208,153 @@ test "serialize and deserialize roundtrip preserves machine state set by M2.8 ti
     try dst.deserialize(&reader);
 
     try std.testing.expectEqual(@as(u8, 0x55), dst.cpu.v[0xA]);
-    try std.testing.expectEqual(@as(u16, 0x305), dst.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x308), dst.cpu.i);
+    try std.testing.expectEqual(@as(u8, 0xC0), dst.bus.ram[0x305]);
+    try std.testing.expectEqual(@as(u8, 0xC1), dst.bus.ram[0x306]);
+    try std.testing.expectEqual(@as(u8, 0xC2), dst.bus.ram[0x307]);
     try std.testing.expectEqual(@as(u16, 0x456), dst.cpu.pc);
     try std.testing.expectEqual(@as(u4, 1), dst.cpu.sp);
-    try std.testing.expectEqual(@as(u16, 0x206), dst.cpu.stack[0]);
+    try std.testing.expectEqual(@as(u16, 0x208), dst.cpu.stack[0]);
     try std.testing.expectEqual(@as(Cycles, 1234), dst.timing.cycles);
     try std.testing.expectEqual(@as(u8, 7), dst.timing.delay_timer);
     try std.testing.expectEqual(@as(u8, 9), dst.timing.sound_timer);
     try std.testing.expectEqual(@as(u16, 0x00A0), dst.keypad.state);
     try std.testing.expectEqual(@as(?u4, 0xC), dst.keypad.last_released);
     try std.testing.expectEqual(@as(u1, 1), dst.framebuffer.get(10, 5));
+}
+
+test "FX33 writes hundreds, tens, units of VX (123) into RAM[I], RAM[I+1], RAM[I+2]" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 123;
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xF333}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 1), m.bus.ram[0x300]);
+    try std.testing.expectEqual(@as(u8, 2), m.bus.ram[0x301]);
+    try std.testing.expectEqual(@as(u8, 3), m.bus.ram[0x302]);
+    try std.testing.expectEqual(@as(u16, 0x300), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX33 writes (2, 5, 5) for VX=255 — max u8 boundary" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 255;
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xF333}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 2), m.bus.ram[0x300]);
+    try std.testing.expectEqual(@as(u8, 5), m.bus.ram[0x301]);
+    try std.testing.expectEqual(@as(u8, 5), m.bus.ram[0x302]);
+}
+
+test "FX33 writes (0, 0, 0) for VX=0" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0;
+    m.cpu.i = 0x300;
+    m.bus.ram[0x300] = 0xAA;
+    m.bus.ram[0x301] = 0xBB;
+    m.bus.ram[0x302] = 0xCC;
+    try m.loadRom(&assemble(.{0xF333}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0), m.bus.ram[0x300]);
+    try std.testing.expectEqual(@as(u8, 0), m.bus.ram[0x301]);
+    try std.testing.expectEqual(@as(u8, 0), m.bus.ram[0x302]);
+}
+
+test "FX55 with X=0 writes only V0 to RAM[I] and increments I by 1 (vanilla VIP)" {
+    // Sentinel at RAM[I+1] proves the bulk-store stops at X (inclusive) — if
+    // it ran one byte too far, RAM[I+1] would be overwritten with V1.
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x42;
+    m.cpu.v[0x1] = 0x99;
+    m.cpu.i = 0x300;
+    m.bus.ram[0x301] = 0xAA;
+    try m.loadRom(&assemble(.{0xF055}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x42), m.bus.ram[0x300]);
+    try std.testing.expectEqual(@as(u8, 0xAA), m.bus.ram[0x301]);
+    try std.testing.expectEqual(@as(u16, 0x301), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX55 with X=15 stores V0..VF to RAM[I..I+15] and increments I by 16 (vanilla VIP)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    for (0..16) |j| m.cpu.v[j] = @as(u8, @intCast(j)) +% 0xA0;
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xFF55}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    for (0..16) |j| {
+        try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.bus.ram[0x300 + j]);
+    }
+    try std.testing.expectEqual(@as(u16, 0x310), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX65 with X=0 loads V0 from RAM[I] and increments I by 1 (vanilla VIP)" {
+    // Sentinel at V1 proves the bulk-load stops at X (inclusive) — if it ran
+    // one register too far, V1 would be clobbered with RAM[I+1].
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x99;
+    m.cpu.v[0x1] = 0x77;
+    m.cpu.i = 0x300;
+    m.bus.ram[0x300] = 0x42;
+    m.bus.ram[0x301] = 0xBB;
+    try m.loadRom(&assemble(.{0xF065}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x42), m.cpu.v[0x0]);
+    try std.testing.expectEqual(@as(u8, 0x77), m.cpu.v[0x1]);
+    try std.testing.expectEqual(@as(u16, 0x301), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX65 with X=15 loads V0..VF from RAM[I..I+15] and increments I by 16 (vanilla VIP)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.i = 0x300;
+    for (0..16) |j| m.bus.ram[0x300 + j] = @as(u8, @intCast(j)) +% 0xA0;
+    try m.loadRom(&assemble(.{0xFF65}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    for (0..16) |j| {
+        try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.cpu.v[j]);
+    }
+    try std.testing.expectEqual(@as(u16, 0x310), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX55 with I past 0xFFF wraps RAM addressing at 12 bits rather than panicking the host" {
+    // ROMs that set I high before a bulk store would index past ram[4095] if
+    // the new opcode bypassed the bus mask — same rule-12 invariant DXYN
+    // already relies on (see FX1E wrap test and Bus.read8 mask).
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x42;
+    m.cpu.v[0x1] = 0x77;
+    m.cpu.i = 0xFFFE;
+    try m.loadRom(&assemble(.{0xF155}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x42), m.bus.ram[0xFFE]);
+    try std.testing.expectEqual(@as(u8, 0x77), m.bus.ram[0xFFF]);
+    try std.testing.expectEqual(@as(u16, 0x0000), m.cpu.i);
 }

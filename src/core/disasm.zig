@@ -128,6 +128,9 @@ pub fn disasm(opcode: u16) DisasmEntry {
             0x15 => .{ .mnemonic = "LD DT, VX", .x = decode.opX(opcode) },
             0x1E => .{ .mnemonic = "ADD I, VX", .x = decode.opX(opcode) },
             0x29 => .{ .mnemonic = "LD F, VX", .x = decode.opX(opcode) },
+            0x33 => .{ .mnemonic = "LD B, VX", .x = decode.opX(opcode) },
+            0x55 => .{ .mnemonic = "LD [I], VX", .x = decode.opX(opcode) },
+            0x65 => .{ .mnemonic = "LD VX, [I]", .x = decode.opX(opcode) },
             else => DisasmEntry.unknown,
         },
         else => DisasmEntry.unknown,
@@ -326,6 +329,24 @@ test "disasm(0xF329) returns LD F, VX with x populated" {
 test "disasm(0xF318) returns the unknown sentinel (FX18 lands in M5)" {
     const e = disasm(0xF318);
     try std.testing.expectEqualStrings("???", e.mnemonic);
+}
+
+test "disasm(0xF333) returns LD B, VX with x populated" {
+    const e = disasm(0xF333);
+    try std.testing.expectEqualStrings("LD B, VX", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+}
+
+test "disasm(0xF355) returns LD [I], VX with x populated" {
+    const e = disasm(0xF355);
+    try std.testing.expectEqualStrings("LD [I], VX", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+}
+
+test "disasm(0xF365) returns LD VX, [I] with x populated" {
+    const e = disasm(0xF365);
+    try std.testing.expectEqualStrings("LD VX, [I]", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
 }
 
 test "disasm(0xFFFF) still returns the unknown sentinel" {
