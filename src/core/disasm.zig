@@ -111,6 +111,12 @@ pub fn disasm(opcode: u16) DisasmEntry {
             else => DisasmEntry.unknown,
         },
         0xA000 => .{ .mnemonic = "LD I, NNN", .nnn = decode.opNNN(opcode) },
+        0xB000 => .{ .mnemonic = "JP V0, NNN", .nnn = decode.opNNN(opcode) },
+        0xC000 => .{
+            .mnemonic = "RND VX, NN",
+            .x = decode.opX(opcode),
+            .nn = decode.opNN(opcode),
+        },
         0xD000 => .{
             .mnemonic = "DRW VX, VY, N",
             .x = decode.opX(opcode),
@@ -271,6 +277,19 @@ test "disasm(0x93A0) returns SNE VX, VY with x and y populated" {
     try std.testing.expectEqualStrings("SNE VX, VY", e.mnemonic);
     try std.testing.expectEqual(@as(u4, 0x3), e.x);
     try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0xB456) returns JP V0, NNN with nnn populated" {
+    const e = disasm(0xB456);
+    try std.testing.expectEqualStrings("JP V0, NNN", e.mnemonic);
+    try std.testing.expectEqual(@as(u16, 0x456), e.nnn);
+}
+
+test "disasm(0xC5AB) returns RND VX, NN with x and nn populated" {
+    const e = disasm(0xC5AB);
+    try std.testing.expectEqualStrings("RND VX, NN", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x5), e.x);
+    try std.testing.expectEqual(@as(u8, 0xAB), e.nn);
 }
 
 test "disasm(0xFFFF) still returns the unknown sentinel" {
