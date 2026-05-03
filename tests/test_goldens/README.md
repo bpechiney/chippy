@@ -10,10 +10,15 @@ verify. Two kinds live here:
   gate (ADR 0004) — CI re-runs each ROM and asserts the bytes match.
   Re-baseline via `UPDATE_GOLDENS=1`.
 - **Reference screenshots** (`*.png`): published images from the
-  upstream test suite. The corresponding golden test decodes the PNG
-  pixel-by-pixel into the same packed format and asserts equality
-  against the captured snapshot — the correctness-against-external-
-  authority gate (ADR 0004, M2 retro carry-forward).
+  upstream test suite, kept here as the *reviewer's* eyeball-gate
+  reference at PR review time. The runtime PNG decode + pixel-equality
+  test originally specified in M2.11 was de-scoped for chippy in M4.2
+  (issue #79) — the cost (~300 LOC of test-only PNG decoder, non-carry
+  -forward to Game Boy) was asymmetric to a one-time correctness anchor
+  the reviewer can verify by eye against the framed render in 5
+  seconds. Cross-runner determinism via the captured `.bin` carries the
+  regression load forward; provenance + SHA-256 below preserve the
+  audit chain.
 
 ## `Cosmac-VIP-quirks.png`
 
@@ -24,5 +29,5 @@ verify. Two kinds live here:
 - **SHA-256:** `722d948179804b6eab469dbd25f1574dfb17ace655f4b18a9dcae7ae768b03cd`
 - **Represents:** Timendus's published reference for `5-quirks.ch8`
   running with COSMAC VIP defaults — every quirk row shows a pass
-  marker. Will be the correctness-against-external-authority gate for
-  the M4 `5-quirks.ch8` golden test (deferred from M3.4 per issue #71).
+  marker. Used by the reviewer at PR-review time as the eyeball-gate
+  for the M4 `5-quirks.ch8` golden test (issue #79).
