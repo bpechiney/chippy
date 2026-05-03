@@ -1,6 +1,7 @@
 //! Cycle counter and 60 Hz delay/sound timer state. `Cycles` is `u64` so
 //! long-running tests don't wrap (u32 wraps in roughly 70 minutes at 1 MHz,
-//! enough for CHIP-8 but not for SNES).
+//! enough for CHIP-8 but not for Game Boy / NES / SNES, where sub-instruction
+//! cycle counts pile up fast).
 
 pub const Cycles = u64;
 
