@@ -88,6 +88,16 @@ jobs:
             echo "core invariant violation: awaiting_release accessed outside src/core/keypad.zig (use Keypad.pollAwaitedKey / isAwaiting / serialize / deserialize)"
             exit 1
           fi
+          # Bus RAM is owned by Bus. The 12-bit-mask invariant from CLAUDE.md
+          # rule 12 lives in the type — only Bus methods (read8 / read16 /
+          # write8 / loadRom / pokeSlice / peekSlice / serialize / deserialize)
+          # may index the storage array. Closes the PR #60 footgun documented
+          # in `docs/next-target-handoff.md` bullet 16. Path-pinned so a future
+          # second `bus.zig` elsewhere can't bypass.
+          if grep -rn 'bus\.ram\[' src/ | grep -v '^src/core/bus.zig:'; then
+            echo "core invariant violation: bus.ram[ accessed outside src/core/bus.zig (use Bus.read8 / write8 / loadRom / pokeSlice / peekSlice / serialize / deserialize, or Machine.pokeRam / pokeRamSlice)"
+            exit 1
+          fi
 
       - name: Build
         run: nix develop -c zig build
