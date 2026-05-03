@@ -21,6 +21,8 @@
       devShells.default = pkgs.mkShell {
         packages = [
           pkgs.git
+          pkgs.gh
+          pkgs.jq
           zig
           pkgs.just
         ];

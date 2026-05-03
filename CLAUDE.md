@@ -61,7 +61,7 @@ Wraps the per-PR loop. See ADR 0007.
 
 ## Per-PR loop
 
-1. Pick `ready-for-agent` sub-issue. Branch `N-slug` from `master`.
+1. Pick `ready-for-agent` sub-issue. Branch `N-slug` from latest `origin/master`. Enforced mechanically: a project-level PreToolUse hook (ADR 0011) blocks `Edit`/`Write`/`MultiEdit` while on `master` and while on a branch whose upstream is `[gone]` (already merged). Post-merge cleanup — checkout master, fetch, pull --rebase, delete the merged branch — runs automatically via PostToolUse on `gh pr merge` and via SessionStart on every fresh-context boundary (`startup`, `resume`, `clear`).
 2. Implement via `/tdd` — tracer-bullet red-green-refactor against the public surface declared in the agent brief. Tests and code land in the same commit. Test the real `Bus` / `Cpu` / `Machine` (rule 11). If the first failing test forces a contract decision the PRD did not make, stop and sharpen the PRD before continuing — that is the ambiguity signal, not a cue to keep coding. Enforced mechanically: a project-level PreToolUse hook (ADR 0009) blocks `Edit`/`Write`/`MultiEdit` on `src/**` while on an issue branch until `/tdd` is invoked in the current session.
 3. `/simplify` on the diff.
 4. `/commit`.
