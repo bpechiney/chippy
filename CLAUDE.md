@@ -62,7 +62,7 @@ Wraps the per-PR loop. See ADR 0007.
 ## Per-PR loop
 
 1. Pick `ready-for-agent` sub-issue. Branch `N-slug` from `master`.
-2. Implement via `/tdd` — tracer-bullet red-green-refactor against the public surface declared in the agent brief. Tests and code land in the same commit. Test the real `Bus` / `Cpu` / `Machine` (rule 11). If the first failing test forces a contract decision the PRD did not make, stop and sharpen the PRD before continuing — that is the ambiguity signal, not a cue to keep coding.
+2. Implement via `/tdd` — tracer-bullet red-green-refactor against the public surface declared in the agent brief. Tests and code land in the same commit. Test the real `Bus` / `Cpu` / `Machine` (rule 11). If the first failing test forces a contract decision the PRD did not make, stop and sharpen the PRD before continuing — that is the ambiguity signal, not a cue to keep coding. Enforced mechanically: a project-level PreToolUse hook (ADR 0009) blocks `Edit`/`Write`/`MultiEdit` on `src/**` while on an issue branch until `/tdd` is invoked in the current session.
 3. `/simplify` on the diff.
 4. `/commit`.
 5. `/commit-push-pr`.
