@@ -48,6 +48,7 @@ All commands run inside the pinned dev shell:
     - Never calls `std.time.Timer` or any wall-clock function.
     - Never calls `std.crypto.random` or any OS-randomness function.
     - Never panics on input that came from a ROM. Internal logic errors only.
+13. No deferring a review-flagged test-case gap or convention break. Defer only with an evidence-grounded argument the gap isn't real — speculation about future coverage isn't one.
 
 ## Per-milestone loop
 
@@ -66,7 +67,7 @@ Wraps the per-PR loop. See ADR 0007.
 3. `/simplify` on the diff.
 4. `/commit`.
 5. `/commit-push-pr`.
-6. `/review` (or the `feature-dev:code-reviewer` agent) for cold-read review.
+6. `/review` (or the `feature-dev:code-reviewer` agent) for cold-read review. Per rule 13, defer a flagged gap only with an evidence-grounded argument that it isn't real.
 7. CI green on `ubuntu-latest` ∩ `macos-latest`.
 8. Merge.
 
