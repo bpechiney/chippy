@@ -165,6 +165,15 @@ pub const Machine = struct {
                 self.emitSpriteLog(x, y, n, collided);
                 draw = .{ .x = x, .y = y, .n = n, .collision = collided };
             },
+            0xE000 => switch (decode.opNN(opcode)) {
+                0x9E => if (self.keypad.isDown(@truncate(self.cpu.v[decode.opX(opcode)]))) {
+                    self.cpu.pc +%= 2;
+                },
+                0xA1 => if (!self.keypad.isDown(@truncate(self.cpu.v[decode.opX(opcode)]))) {
+                    self.cpu.pc +%= 2;
+                },
+                else => {},
+            },
             0xF000 => switch (decode.opNN(opcode)) {
                 0x07 => self.cpu.v[decode.opX(opcode)] = self.timing.delay_timer,
                 0x15 => self.timing.delay_timer = self.cpu.v[decode.opX(opcode)],
@@ -738,6 +747,76 @@ test "9XY1 (non-zero low nibble) is a silent no-op that only advances PC" {
     m.cpu.v[0x3] = 0x11;
     m.cpu.v[0xA] = 0x22;
     try m.loadRom(&assemble(.{0x93A1}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "EX9E VX: skip when key VX is down (PC += 4)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x05;
+    try m.loadRom(&assemble(.{0xE09E}));
+    m.setKey(0x5, true);
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.pc);
+}
+
+test "EX9E VX: no-skip when key VX is up (PC += 2)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x05;
+    try m.loadRom(&assemble(.{0xE09E}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "EXA1 VX: skip when key VX is up (PC += 4)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x07;
+    try m.loadRom(&assemble(.{0xE3A1}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.pc);
+}
+
+test "EXA1 VX: no-skip when key VX is down (PC += 2)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x07;
+    try m.loadRom(&assemble(.{0xE3A1}));
+    m.setKey(0x7, true);
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "EX9E VX: high nibble of VX is masked off — only low nibble selects the key" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x2] = 0xA5;
+    try m.loadRom(&assemble(.{0xE29E}));
+    m.setKey(0x5, true);
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.pc);
+}
+
+test "EXA1 VX: high nibble of VX is masked off — only low nibble selects the key" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x2] = 0xF5;
+    try m.loadRom(&assemble(.{0xE2A1}));
+    m.setKey(0x5, true);
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
