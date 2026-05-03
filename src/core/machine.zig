@@ -10,6 +10,7 @@ const Timing = timing_mod.Timing;
 const Cycles = timing_mod.Cycles;
 const Options = @import("options.zig").Options;
 const rom = @import("rom.zig");
+const assemble = @import("assemble.zig").assemble;
 
 pub const StepResult = enum { ran, waiting_for_vblank, halted };
 
@@ -45,8 +46,16 @@ pub const Machine = struct {
     }
 
     pub fn step(self: *Machine) StepResult {
-        _ = self;
-        return .halted;
+        const opcode = self.bus.read16(self.cpu.pc);
+        self.cpu.pc +%= 2;
+        switch (opcode & 0xF000) {
+            0x0000 => switch (opcode) {
+                0x00E0 => self.framebuffer.clear(),
+                else => {},
+            },
+            else => {},
+        }
+        return .ran;
     }
 
     pub fn runCycles(self: *Machine, n: u32) Cycles {
@@ -151,30 +160,12 @@ test "loadRom copies bytes to 0x200 and rejects oversized input" {
     try std.testing.expectError(error.RomTooLarge, m.loadRom(&oversized));
 }
 
-test "step returns halted in M0 (opcodes land at M1)" {
-    var m = Machine.init(.{});
-    defer m.deinit();
-    try std.testing.expectEqual(StepResult.halted, m.step());
-}
-
-test "runCycles stops at halted and reports zero cycles ran" {
+test "runCycles runs all requested cycles when nothing halts" {
     var m = Machine.init(.{});
     defer m.deinit();
     const ran = m.runCycles(100);
-    try std.testing.expectEqual(@as(Cycles, 0), ran);
-    try std.testing.expectEqual(@as(Cycles, 0), m.timing.cycles);
-}
-
-test "runUntil returns halted immediately when step halts" {
-    var m = Machine.init(.{});
-    defer m.deinit();
-
-    const Predicate = struct {
-        fn neverDone(_: *const Machine) bool {
-            return false;
-        }
-    };
-    try std.testing.expectEqual(StepResult.halted, m.runUntil(Predicate.neverDone));
+    try std.testing.expectEqual(@as(Cycles, 100), ran);
+    try std.testing.expectEqual(@as(Cycles, 100), m.timing.cycles);
 }
 
 test "runUntil returns ran when the predicate is already satisfied" {
@@ -192,6 +183,31 @@ test "runUntil returns ran when the predicate is already satisfied" {
 test "deinit is callable on a fresh machine without crashing" {
     var m = Machine.init(.{});
     m.deinit();
+}
+
+test "00E0 clears the framebuffer and advances PC by 2" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    try m.loadRom(&assemble(.{0x00E0}));
+    m.framebuffer.set(3, 4, 1);
+    m.framebuffer.set(63, 31, 1);
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    for (m.framebuffer.pixels) |px| try std.testing.expectEqual(@as(u1, 0), px);
+}
+
+test "0NNN (non-00E0) is a silent no-op that only advances PC" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    try m.loadRom(&assemble(.{0x0123}));
+    m.framebuffer.set(10, 5, 1);
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(10, 5));
 }
 
 test "serialize and deserialize roundtrip preserves machine state" {

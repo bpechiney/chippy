@@ -13,6 +13,7 @@ pub const disasm = @import("disasm.zig").disasm;
 pub const DisasmEntry = @import("disasm.zig").DisasmEntry;
 pub const RomError = @import("rom.zig").RomError;
 pub const ROM_MAX_BYTES = @import("bus.zig").ROM_MAX_BYTES;
+pub const assemble = @import("assemble.zig").assemble;
 
 test {
     _ = @import("machine.zig");
@@ -27,4 +28,5 @@ test {
     _ = @import("disasm.zig");
     _ = @import("trace.zig");
     _ = @import("options.zig");
+    _ = @import("assemble.zig");
 }
