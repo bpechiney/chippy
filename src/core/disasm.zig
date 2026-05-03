@@ -20,9 +20,11 @@ pub fn disasm(opcode: u16) DisasmEntry {
     return switch (opcode & 0xF000) {
         0x0000 => switch (opcode) {
             0x00E0 => .{ .mnemonic = "CLS" },
+            0x00EE => .{ .mnemonic = "RET" },
             else => .{ .mnemonic = "SYS NNN", .nnn = opcode & 0x0FFF },
         },
         0x1000 => .{ .mnemonic = "JP NNN", .nnn = opcode & 0x0FFF },
+        0x2000 => .{ .mnemonic = "CALL NNN", .nnn = opcode & 0x0FFF },
         0x6000 => .{
             .mnemonic = "LD VX, NN",
             .x = @intCast((opcode & 0x0F00) >> 8),
@@ -87,6 +89,17 @@ test "disasm(0xD123) returns DRW VX, VY, N with x, y, n populated" {
     try std.testing.expectEqual(@as(u4, 0x1), e.x);
     try std.testing.expectEqual(@as(u4, 0x2), e.y);
     try std.testing.expectEqual(@as(u4, 0x3), e.n);
+}
+
+test "disasm(0x00EE) returns RET" {
+    const e = disasm(0x00EE);
+    try std.testing.expectEqualStrings("RET", e.mnemonic);
+}
+
+test "disasm(0x2456) returns CALL NNN with nnn populated" {
+    const e = disasm(0x2456);
+    try std.testing.expectEqualStrings("CALL NNN", e.mnemonic);
+    try std.testing.expectEqual(@as(u16, 0x456), e.nnn);
 }
 
 test "disasm(0xFFFF) still returns the unknown sentinel" {

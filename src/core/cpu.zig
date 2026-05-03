@@ -9,6 +9,8 @@ pub const Cpu = struct {
     v: [16]u8 = [_]u8{0} ** 16,
     i: u16 = 0,
     pc: u16 = ROM_LOAD_ADDRESS,
-    sp: u8 = 0,
+    // ROM-driven CALL depth never exceeds 16; on violation we wrap rather
+    // than panic the host (rule 12).
+    sp: u4 = 0,
     stack: [16]u16 = [_]u16{0} ** 16,
 };
