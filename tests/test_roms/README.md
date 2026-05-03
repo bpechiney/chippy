@@ -18,9 +18,10 @@ locally.
 - **SHA-256:** `00072a250d2f7ccaa3ecc0182bac73e63c168abab96d7ea2df5eba6a4da49067`
 - **Size:** 132 bytes.
 - **Behavior:** clears the screen, draws the letters "IBM" via six DXYN
-  sprites, then `JP`s to itself in a terminal infinite loop. All draws
-  finish well before cycle 30, which is the cycle count the golden
-  snapshot is taken at (`tests/test_goldens/ibm_logo_after_30_cycles.bin`).
+  sprites, then `JP`s to itself in a terminal infinite loop. Cycle count
+  bumped from 30 to 100 in M3.3 to give the vBlank-wait stall path enough
+  budget; see ADR 0012. Captured bytes unchanged
+  (`tests/test_goldens/ibm_logo_after_100_cycles.bin`).
 
 ## `corax_plus.ch8`
 

@@ -19,8 +19,10 @@ const display = @import("display.zig");
 const bus_mod = @import("bus.zig");
 
 const ROM_PATH = "tests/test_roms/ibm_logo.ch8";
-const GOLDEN_PATH = "tests/test_goldens/ibm_logo_after_30_cycles.bin";
-const CYCLE_COUNT: u32 = 30;
+const GOLDEN_PATH = "tests/test_goldens/ibm_logo_after_100_cycles.bin";
+// Bumped 30→100 for M3.3 vBlank-wait stall budget; see ADR 0012. Captured
+// bytes unchanged (vanilla JP-self loop is framebuffer-stable beyond N≈14).
+const CYCLE_COUNT: u32 = 100;
 const PACKED_BYTES: usize = display.PIXELS / 8;
 
 /// Row-major, MSB = leftmost pixel — the standard CHIP-8 sprite-pack layout,
@@ -45,7 +47,7 @@ fn updateGoldensRequested() bool {
     return std.mem.eql(u8, v, "1");
 }
 
-test "IBM logo: framebuffer after 30 cycles matches golden" {
+test "IBM logo: framebuffer after 100 cycles matches golden" {
     const cwd = std.Io.Dir.cwd();
     const io = std.testing.io;
 
