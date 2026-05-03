@@ -177,7 +177,7 @@ pub const Machine = struct {
                     for (0..@as(usize, x) + 1) |j| {
                         self.bus.write8(self.cpu.i +% @as(u16, @intCast(j)), self.cpu.v[j]);
                     }
-                    // M3: gate on Quirks.no_index_increment (vanilla = I += X + 1; see #56).
+                    // M3: gate on Quirks.no_index_increment (vanilla VIP increments I; see #56).
                     self.cpu.i +%= @as(u16, x) + 1;
                 },
                 0x65 => {
@@ -185,7 +185,7 @@ pub const Machine = struct {
                     for (0..@as(usize, x) + 1) |j| {
                         self.cpu.v[j] = self.bus.read8(self.cpu.i +% @as(u16, @intCast(j)));
                     }
-                    // M3: gate on Quirks.no_index_increment (vanilla = I += X + 1; see #56).
+                    // M3: gate on Quirks.no_index_increment (vanilla VIP increments I; see #56).
                     self.cpu.i +%= @as(u16, x) + 1;
                 },
                 else => {},
@@ -1356,5 +1356,20 @@ test "FX55 with I past 0xFFF wraps RAM addressing at 12 bits rather than panicki
 
     try std.testing.expectEqual(@as(u8, 0x42), m.bus.ram[0xFFE]);
     try std.testing.expectEqual(@as(u8, 0x77), m.bus.ram[0xFFF]);
+    try std.testing.expectEqual(@as(u16, 0x0000), m.cpu.i);
+}
+
+test "FX65 with I past 0xFFF wraps RAM addressing at 12 bits rather than panicking the host" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.bus.ram[0xFFE] = 0x42;
+    m.bus.ram[0xFFF] = 0x77;
+    m.cpu.i = 0xFFFE;
+    try m.loadRom(&assemble(.{0xF165}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x42), m.cpu.v[0x0]);
+    try std.testing.expectEqual(@as(u8, 0x77), m.cpu.v[0x1]);
     try std.testing.expectEqual(@as(u16, 0x0000), m.cpu.i);
 }
