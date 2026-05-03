@@ -62,8 +62,6 @@ pub fn runAndCompare(opts: RunOptions) !void {
 }
 
 // Row-major, MSB = leftmost so a hex dump of the snapshot reads like the screen.
-// Reused by `scripted_input.zig` to compare per-checkpoint framebuffers in
-// the keypad-input multi-checkpoint test (ADR 0004 + issue #80).
 pub fn packFramebuffer(fb: *const Framebuffer) [PACKED_BYTES]u8 {
     var out: [PACKED_BYTES]u8 = [_]u8{0} ** PACKED_BYTES;
     for (0..display.HEIGHT) |row| {
