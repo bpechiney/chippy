@@ -13,7 +13,7 @@ A single decoded operation that the CPU executes. One instruction per opcode.
 _Avoid_: command
 
 **Cycle**:
-The unit of CPU advancement. For CHIP-8, one cycle equals one instruction. Reserved for sub-instruction granularity in future projects (e.g., SNES, where one instruction is multiple cycles).
+The unit of CPU advancement. For CHIP-8, one cycle equals one instruction. Reserved for sub-instruction granularity in future projects (e.g., Game Boy M-cycles / T-cycles, NES PPU dot timing, SNES sub-instruction cycles).
 _Avoid_: tick, step (when meaning a unit of progress)
 
 **Frame**:

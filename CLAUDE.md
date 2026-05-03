@@ -4,7 +4,7 @@ Operating manual for Claude sessions on chippy. Read once at session start.
 
 ## Project at a glance
 
-Chippy is a vanilla COSMAC VIP CHIP-8 emulator in Zig 0.16. It is also a deliberate stepping-stone toward a future SNES emulator and a test-bed for AI-harness engineering. Decisions favor architectural patterns that carry to SNES (module boundaries, headless determinism, save-state shape) over CHIP-8-only minimalism.
+Chippy is a vanilla COSMAC VIP CHIP-8 emulator in Zig 0.16. It is the first rung on a four-stage ladder — chippy → Game Boy → NES → SNES (see ADR 0010) — and a test-bed for AI-harness engineering. Decisions favor architectural patterns that carry forward (module boundaries, headless determinism, save-state shape) over CHIP-8-only minimalism. Game Boy is the immediate next target; "the next emulator" elsewhere in this document means GB unless otherwise noted.
 
 ## The non-negotiable rule
 
@@ -15,7 +15,7 @@ Chippy is a vanilla COSMAC VIP CHIP-8 emulator in Zig 0.16. It is also a deliber
 - **Domain language:** `CONTEXT.md` (root). Update when introducing a new domain term.
 - **Decisions:** `docs/adr/NNNN-*.md`. Append-only; supersede, don't edit.
 - **Roadmap state:** Pinned GitHub roadmap meta-issue (`bpechiney/chippy#2`) with milestone checklist; sub-issues link from there. View with `gh issue view 2 --repo bpechiney/chippy`.
-- **Lessons:** `docs/retros/MN.md` (frozen at write time) for what happened; `docs/snes-handoff.md` (curated, living) for what SNES needs to do/avoid.
+- **Lessons:** `docs/retros/MN.md` (frozen at write time) for what happened; `docs/next-target-handoff.md` (curated, living) for what the next emulator (Game Boy first) needs to do/avoid.
 - **Skills registry:** `AGENTS.md`.
 - **Plan-of-record:** `~/.claude/plans/we-need-to-nail-smooth-bird.md`.
 
@@ -57,7 +57,7 @@ Wraps the per-PR loop. See ADR 0007.
 2. **Slice.** Triage the PRD into 1–N implementation sub-issues with acceptance criteria. Sub-issues link back to the PRD as parent.
 3. **Triage to ready.** Move sub-issues from `needs-triage` to `ready-for-agent` (or `ready-for-human`).
 4. **Implement.** Per sub-issue, run the per-PR loop below.
-5. **Close.** After the last sub-issue merges: write `docs/retros/MN.md`, promote SNES-bound bullets to `docs/snes-handoff.md`, close the PRD issue, tick the meta-issue checkbox.
+5. **Close.** After the last sub-issue merges: write `docs/retros/MN.md`, promote next-emulator-bound bullets to `docs/next-target-handoff.md`, close the PRD issue, tick the meta-issue checkbox.
 
 ## Per-PR loop
 
@@ -76,21 +76,21 @@ Wraps the per-PR loop. See ADR 0007.
 
 - `/diagnose` — disciplined reproduce → minimize → root-cause loop. Whenever a test goes red unexpectedly. **Root cause, never symptom.** Flaky test = fix the determinism bug, never add retries.
 - `/request-refactor-plan` — any cross-file refactor. Refactors are their own PR; never mixed with feature work.
-- `/improve-codebase-architecture` — between milestones. **Mandatory before SNES kickoff.**
+- `/improve-codebase-architecture` — between milestones. **Mandatory before Game Boy kickoff** (and before each subsequent next-emulator handoff per ADR 0010).
 - `/codex:rescue` — second-opinion / second-implementation pass when stuck.
 - `/grill-with-docs` — non-trivial design, fuzzy terminology, decisions that probably need an ADR.
 - `/revise-claude-md` — at session end, if invariants changed.
 
 ## Lessons capture
 
-- Per-PR close: if a non-obvious lesson emerged, append a bullet to `docs/snes-handoff.md` *now*. Don't defer.
-- Per-milestone close: write `docs/retros/MN.md` (≤ 1 page). Promote SNES-bound bullets to handoff with back-reference.
+- Per-PR close: if a non-obvious lesson emerged, append a bullet to `docs/next-target-handoff.md` *now*. Don't defer.
+- Per-milestone close: write `docs/retros/MN.md` (≤ 1 page). Promote next-emulator-bound bullets to handoff with back-reference.
 - On architecture reversal: new ADR + retro/handoff update.
 - `docs/retros/MN.md` is **frozen after write** — never edit; supersede if needed.
 
 ## What this project is *not*
 
 - Not aiming for SUPER-CHIP or XO-CHIP compatibility (vanilla COSMAC VIP only). Stretch goal post-v1.
-- Not building a graphical debugger UI (Tier 3 deferred to SNES).
-- Not running on Windows in v1 (deferred to SNES).
+- Not building a graphical debugger UI (Tier 3 still deferred to SNES per ADR 0006; re-evaluate at Game Boy kickoff per ADR 0010 but no pre-commit).
+- Not running on Windows in v1 (still deferred to SNES per ADR 0010; re-evaluate at Game Boy kickoff but no pre-commit).
 - Not optimizing for performance (correctness and clarity first; CHIP-8 is trivially fast on any hardware).

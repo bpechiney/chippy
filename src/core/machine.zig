@@ -91,7 +91,8 @@ pub const Machine = struct {
     /// Serializes machine state field-by-field rather than via `asBytes`.
     /// Padding bytes inside structs are ABI- and compiler-version-dependent,
     /// so save files written this way survive struct-layout changes when M1+
-    /// grows the state. SNES will need this same shape.
+    /// grows the state. The next emulator (Game Boy first) will need this
+    /// same shape across MBC / mapper variants.
     pub fn serialize(self: *const Machine, writer: anytype) !void {
         try writer.writeAll(&self.bus.ram);
         try writer.writeAll(&self.cpu.v);

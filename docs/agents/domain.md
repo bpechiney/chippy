@@ -22,7 +22,7 @@ This repo uses a **single-context** layout:
 └── src/
 ```
 
-If/when this project grows enough subdomains to warrant per-area glossaries (e.g. when graduating to a SNES emulator with distinct CPU/PPU/APU/DMA vocabularies), convert by adding a `CONTEXT-MAP.md` at the root and splitting `CONTEXT.md` into per-context files under `src/<context>/CONTEXT.md`.
+If/when this project grows enough subdomains to warrant per-area glossaries (e.g. when graduating to a Game Boy / NES / SNES emulator with distinct CPU/PPU/APU/MBC vocabularies), convert by adding a `CONTEXT-MAP.md` at the root and splitting `CONTEXT.md` into per-context files under `src/<context>/CONTEXT.md`.
 
 ## Use the glossary's vocabulary
 
