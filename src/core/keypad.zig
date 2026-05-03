@@ -1,31 +1,22 @@
 //! 16-key hex keypad. `state` is a bitmask (bit N set = key N down).
-//! `last_released` retains the most recently released key so `FX0A` (which
-//! blocks until a key is *released*, not pressed) has something to read.
+//! `awaiting_release` is the per-FX0A claim slot: null between FX0A
+//! invocations, so pre-FX0A keypad noise can't satisfy the next FX0A.
+//! See ADR 0013.
 
 pub const Keypad = struct {
     state: u16 = 0,
-    last_released: ?u4 = null,
+    awaiting_release: ?u4 = null,
 
     pub fn setKey(self: *Keypad, key: u4, down: bool) void {
         const bit = @as(u16, 1) << key;
         if (down) {
             self.state |= bit;
         } else {
-            if (self.state & bit != 0) self.last_released = key;
             self.state &= ~bit;
         }
     }
 
     pub fn isDown(self: *const Keypad, key: u4) bool {
         return (self.state & (@as(u16, 1) << key)) != 0;
-    }
-
-    /// Reads the latch and clears it in one step — `FX0A` is the only caller
-    /// so atomic semantics live here rather than as a get-then-null pattern
-    /// at every callsite.
-    pub fn consumeLastReleased(self: *Keypad) ?u4 {
-        const key = self.last_released;
-        self.last_released = null;
-        return key;
     }
 };
