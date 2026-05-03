@@ -21,3 +21,27 @@ locally.
   sprites, then `JP`s to itself in a terminal infinite loop. All draws
   finish well before cycle 30, which is the cycle count the golden
   snapshot is taken at (`tests/test_goldens/ibm_logo_after_30_cycles.bin`).
+
+## `corax_plus.ch8`
+
+- **Source:** `bin/3-corax+.ch8` from
+  [Timendus/chip8-test-suite](https://github.com/Timendus/chip8-test-suite),
+  retrieved 2026-05-03.
+- **License:** GPL-3.0, matching this repo's own license.
+- **Underlying authorship:** corax89's CHIP-8 opcode self-test
+  (`corax89/chip8-test-rom`), adopted into Timendus's suite as the third
+  bundled ROM. Verifies CHIP-8 opcode behavior cell-by-cell on a 4×6
+  grid: 1NNN, 2NNN, 00EE, 3XNN, 4XNN, 5XY0, 7XNN, 9XY0, 8XY0–8XY7,
+  8XYE, FX55, FX65, FX33, FX1E, plus a register-overflow test. Each
+  cell shows the opcode mnemonic followed by a tiny checkmark on pass
+  or a cross on fail; the bottom-right cell renders a `v4.2` version
+  label.
+- **SHA-256:** `1c7e14eae14d6d5e1e47693804110354cbc4081defe4e6e5d9167c25ffc7b4b0`
+- **Size:** 761 bytes.
+- **Behavior:** runs each opcode test in sequence, draws the result
+  cell, then `JP`s to itself once the grid is fully drawn. The
+  framebuffer stabilizes by cycle ~350; the golden snapshot is taken at
+  cycle 1000 (`tests/test_goldens/corax_plus_after_1000_cycles.bin`)
+  for a comfortable safety margin while keeping the test sub-millisecond.
+  The committed golden bytes match Timendus's published reference
+  screenshot pixel-for-pixel.

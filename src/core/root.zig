@@ -36,4 +36,5 @@ test {
     _ = @import("assemble.zig");
     _ = @import("decode.zig");
     _ = @import("golden_ibm_logo.zig");
+    _ = @import("golden_corax_plus.zig");
 }
