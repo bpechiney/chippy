@@ -57,6 +57,15 @@ pub const Machine = struct {
             0x6000 => self.cpu.v[(opcode & 0x0F00) >> 8] = @truncate(opcode & 0x00FF),
             0x7000 => self.cpu.v[(opcode & 0x0F00) >> 8] +%= @truncate(opcode & 0x00FF),
             0xA000 => self.cpu.i = opcode & 0x0FFF,
+            0xD000 => {
+                const x = self.cpu.v[(opcode & 0x0F00) >> 8];
+                const y = self.cpu.v[(opcode & 0x00F0) >> 4];
+                const n = opcode & 0x000F;
+                var sprite: [15]u8 = undefined;
+                for (0..n) |j| sprite[j] = self.bus.read8(self.cpu.i +% @as(u16, @intCast(j)));
+                const collided = self.framebuffer.xorSprite(x, y, sprite[0..n]);
+                self.cpu.v[0xF] = @intFromBool(collided);
+            },
             else => {},
         }
         return .ran;
@@ -257,6 +266,58 @@ test "ANNN loads NNN into I and advances PC" {
 
     try std.testing.expectEqual(StepResult.ran, m.step());
     try std.testing.expectEqual(@as(u16, 0x789), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "DXYN draws an N-byte sprite at (V[X], V[Y]) from RAM[I] and reports no collision on a clear framebuffer" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    const sprite = [_]u8{ 0b1010_0011, 0b1100_0000, 0b0000_1111 };
+    m.bus.ram[0x300] = sprite[0];
+    m.bus.ram[0x301] = sprite[1];
+    m.bus.ram[0x302] = sprite[2];
+    m.cpu.i = 0x300;
+    m.cpu.v[0x2] = 5;
+    m.cpu.v[0x3] = 7;
+    // Sentinel — the assertion below proves DXYN wrote 0, not that vF was already 0.
+    m.cpu.v[0xF] = 0xAA;
+    try m.loadRom(&assemble(.{0xD233}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    const row0 = [_]u1{ 1, 0, 1, 0, 0, 0, 1, 1 };
+    const row1 = [_]u1{ 1, 1, 0, 0, 0, 0, 0, 0 };
+    const row2 = [_]u1{ 0, 0, 0, 0, 1, 1, 1, 1 };
+    for (row0, 0..) |bit, col| try std.testing.expectEqual(bit, m.framebuffer.get(5 + col, 7));
+    for (row1, 0..) |bit, col| try std.testing.expectEqual(bit, m.framebuffer.get(5 + col, 8));
+    for (row2, 0..) |bit, col| try std.testing.expectEqual(bit, m.framebuffer.get(5 + col, 9));
+}
+
+test "DXYN drawing the same sprite twice at the same coords erases it and sets vF == 1" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.bus.ram[0x300] = 0b1111_0000;
+    m.cpu.i = 0x300;
+    m.cpu.v[0x4] = 10;
+    m.cpu.v[0x5] = 12;
+    try m.loadRom(&assemble(.{ 0xD451, 0xD451 }));
+
+    _ = m.step();
+    _ = m.step();
+
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+    for (0..8) |col| try std.testing.expectEqual(@as(u1, 0), m.framebuffer.get(10 + col, 12));
+}
+
+test "DXYN advances PC by 2" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xD123}));
+
+    _ = m.step();
+
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
