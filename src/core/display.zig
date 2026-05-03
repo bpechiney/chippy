@@ -75,6 +75,20 @@ test "xorSprite: drawing the same sprite twice at the same location erases it an
     for (0..WIDTH) |col| try std.testing.expectEqual(@as(u1, 0), fb.get(col, 0));
 }
 
+test "xorSprite: a zero sprite-bit over a lit framebuffer pixel does not report a collision or clear the pixel" {
+    var fb: Framebuffer = .{};
+    fb.set(0, 0, 1);
+    // The MSB of this byte is 0; column 0 of the sprite is therefore a zero-bit.
+    // A naive impl that flagged collision on any already-set pixel inside the
+    // sprite footprint (rather than only on a 1→0 transition) would fail here.
+    const sprite = [_]u8{0b0111_1111};
+
+    const collided = fb.xorSprite(0, 0, &sprite);
+
+    try std.testing.expectEqual(false, collided);
+    try std.testing.expectEqual(@as(u1, 1), fb.get(0, 0));
+}
+
 test "xorSprite: a 2-byte sprite lights two adjacent rows independently" {
     var fb: Framebuffer = .{};
     const sprite = [_]u8{ 0b1100_0000, 0b0000_0011 };
