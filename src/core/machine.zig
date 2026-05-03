@@ -63,8 +63,30 @@ pub const Machine = struct {
                 self.cpu.sp +%= 1;
                 self.cpu.pc = opcode & 0x0FFF;
             },
+            0x3000 => {
+                if (self.cpu.v[(opcode & 0x0F00) >> 8] == @as(u8, @truncate(opcode & 0x00FF))) {
+                    self.cpu.pc +%= 2;
+                }
+            },
+            0x4000 => {
+                if (self.cpu.v[(opcode & 0x0F00) >> 8] != @as(u8, @truncate(opcode & 0x00FF))) {
+                    self.cpu.pc +%= 2;
+                }
+            },
+            0x5000 => switch (opcode & 0x000F) {
+                0x0 => if (self.cpu.v[(opcode & 0x0F00) >> 8] == self.cpu.v[(opcode & 0x00F0) >> 4]) {
+                    self.cpu.pc +%= 2;
+                },
+                else => {},
+            },
             0x6000 => self.cpu.v[(opcode & 0x0F00) >> 8] = @truncate(opcode & 0x00FF),
             0x7000 => self.cpu.v[(opcode & 0x0F00) >> 8] +%= @truncate(opcode & 0x00FF),
+            0x9000 => switch (opcode & 0x000F) {
+                0x0 => if (self.cpu.v[(opcode & 0x0F00) >> 8] != self.cpu.v[(opcode & 0x00F0) >> 4]) {
+                    self.cpu.pc +%= 2;
+                },
+                else => {},
+            },
             0xA000 => self.cpu.i = opcode & 0x0FFF,
             0xD000 => {
                 const x = self.cpu.v[(opcode & 0x0F00) >> 8];
@@ -395,6 +417,122 @@ test "00EE from sp=0 wraps sp at 4 bits rather than panicking the host" {
 
     try std.testing.expectEqual(@as(u4, 15), m.cpu.sp);
     try std.testing.expectEqual(@as(u16, 0xABC), m.cpu.pc);
+}
+
+test "3XNN skips the next instruction when VX == NN (PC += 4)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x5] = 0x42;
+    try m.loadRom(&assemble(.{0x3542}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.pc);
+}
+
+test "3XNN does not skip when VX != NN (PC += 2)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x5] = 0x41;
+    try m.loadRom(&assemble(.{0x3542}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "4XNN skips the next instruction when VX != NN (PC += 4)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x5] = 0x41;
+    try m.loadRom(&assemble(.{0x4542}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.pc);
+}
+
+test "4XNN does not skip when VX == NN (PC += 2)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x5] = 0x42;
+    try m.loadRom(&assemble(.{0x4542}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "5XY0 skips the next instruction when VX == VY (PC += 4)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x77;
+    m.cpu.v[0xA] = 0x77;
+    try m.loadRom(&assemble(.{0x53A0}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.pc);
+}
+
+test "5XY0 does not skip when VX != VY (PC += 2)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x77;
+    m.cpu.v[0xA] = 0x76;
+    try m.loadRom(&assemble(.{0x53A0}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "5XY1 (non-zero low nibble) is a silent no-op that only advances PC" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x77;
+    m.cpu.v[0xA] = 0x77;
+    try m.loadRom(&assemble(.{0x53A1}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "9XY0 skips the next instruction when VX != VY (PC += 4)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x11;
+    m.cpu.v[0xA] = 0x22;
+    try m.loadRom(&assemble(.{0x93A0}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.pc);
+}
+
+test "9XY0 does not skip when VX == VY (PC += 2)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x11;
+    m.cpu.v[0xA] = 0x11;
+    try m.loadRom(&assemble(.{0x93A0}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "9XY1 (non-zero low nibble) is a silent no-op that only advances PC" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x11;
+    m.cpu.v[0xA] = 0x22;
+    try m.loadRom(&assemble(.{0x93A1}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
 test "0NNN (non-00E0) is a silent no-op that only advances PC" {
