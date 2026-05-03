@@ -47,6 +47,40 @@ locally.
   The committed golden bytes match Timendus's published reference
   screenshot pixel-for-pixel.
 
+## `keypad.ch8`
+
+- **Source:** `bin/6-keypad.ch8` from
+  [Timendus/chip8-test-suite](https://github.com/Timendus/chip8-test-suite),
+  retrieved 2026-05-03. Upstream git-blob
+  `4d1ecdccdf6968522529fff4a18492cd31032600`.
+- **License:** GPL-3.0, matching this repo's own license.
+- **Underlying authorship:** Timendus's keypad-test ROM (sixth bundled
+  test). Verifies all three CHIP-8 keypad opcodes against scripted
+  input: EX9E (skip-if-key-down), EXA1 (skip-if-key-up), and FX0A
+  (GETKEY blocking with two-phase claim/release per ADR 0013).
+- **SHA-256:** `558902b0e406bb97dc808c16d55abf493706598246e3c77aea9d9401063169c9`
+- **Size:** 913 bytes.
+- **Behavior:** at boot, reads `RAM[0x1FF]` and dispatches directly to
+  one of three subtests if the byte is 1, 2, or 3 (1 = `keypad-down`
+  EX9E, 2 = `keypad-up` EXA1, 3 = `keypad-getkey` FX0A); otherwise
+  draws an interactive menu with a blinking cursor and keypad-driven
+  navigation. The EX9E and EXA1 subtests render a 4×4 keypad layout
+  and XOR a cursor sprite into each key's cell whose skip condition
+  fires on the current keypad state; both subtests are infinite loops
+  with no menu return path. The FX0A subtest sets the delay timer to
+  3, blocks on `v0 := key`, then verifies on consume that the timer
+  reached 0 (NOT-HALTING gate) and that the claimed key is up
+  (NOT-RELEASED gate) before drawing "ALL GOOD" + a checkmark and
+  blocking on a second FX0A. The M4.4 golden harness drives all four
+  checkpoints (menu, EX9E with keys 1+6, EXA1 with keys 1+6, FX0A
+  ALL-GOOD after press@cycle 350 / release@cycle 400) via the shared
+  scripted-input helper at `src/core/scripted_input.zig`. Each subtest
+  runs in its own `Machine` instance because the EX9E/EXA1 subtests
+  are dead-end loops with no menu return path. Empirical cycle counts:
+  menu @2000 (cursor-visible blink-phase plateau), down @2000, up
+  @5000, getkey @5000 — see PR description for the full M2.11-style
+  stability sweep.
+
 ## `quirks.ch8`
 
 - **Source:** `bin/5-quirks.ch8` from
