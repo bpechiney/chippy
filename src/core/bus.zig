@@ -6,6 +6,7 @@
 pub const RAM_SIZE: usize = 4096;
 pub const ROM_LOAD_ADDRESS: u16 = 0x200;
 pub const FONTSET_ADDRESS: u16 = 0x050;
+pub const FONT_GLYPH_BYTES: u16 = 5;
 pub const ROM_MAX_BYTES: usize = RAM_SIZE - ROM_LOAD_ADDRESS;
 
 const FONTSET = [_]u8{

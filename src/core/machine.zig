@@ -1,6 +1,8 @@
 const std = @import("std");
 const bus_mod = @import("bus.zig");
 const Bus = bus_mod.Bus;
+const FONTSET_ADDRESS = bus_mod.FONTSET_ADDRESS;
+const FONT_GLYPH_BYTES = bus_mod.FONT_GLYPH_BYTES;
 const Cpu = @import("cpu.zig").Cpu;
 const Framebuffer = @import("display.zig").Framebuffer;
 const Keypad = @import("keypad.zig").Keypad;
@@ -158,6 +160,13 @@ pub const Machine = struct {
                 for (0..n) |j| sprite[j] = self.bus.read8(self.cpu.i +% @as(u16, @intCast(j)));
                 const collided = self.framebuffer.xorSprite(x, y, sprite[0..n]);
                 self.cpu.v[0xF] = @intFromBool(collided);
+            },
+            0xF000 => switch (decode.opNN(opcode)) {
+                0x07 => self.cpu.v[decode.opX(opcode)] = self.timing.delay_timer,
+                0x15 => self.timing.delay_timer = self.cpu.v[decode.opX(opcode)],
+                0x1E => self.cpu.i +%= self.cpu.v[decode.opX(opcode)],
+                0x29 => self.cpu.i = FONTSET_ADDRESS + FONT_GLYPH_BYTES * @as(u16, self.cpu.v[decode.opX(opcode)] & 0x0F),
+                else => {},
             },
             else => {},
         }
@@ -980,6 +989,142 @@ test "0NNN (non-00E0) is a silent no-op that only advances PC" {
     try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(10, 5));
 }
 
+test "FX07 loads the delay timer into VX" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.timing.delay_timer = 42;
+    m.cpu.v[0x3] = 0xAB;
+    try m.loadRom(&assemble(.{0xF307}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 42), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 42), m.timing.delay_timer);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX15 stores VX into the delay timer" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 99;
+    m.timing.delay_timer = 0;
+    try m.loadRom(&assemble(.{0xF315}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 99), m.timing.delay_timer);
+    try std.testing.expectEqual(@as(u8, 99), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX15 then tickTimers then FX07 observes the 60 Hz decrement through the ROM-visible interface" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 5;
+    try m.loadRom(&assemble(.{ 0xF315, 0xF407 }));
+
+    _ = m.step();
+    m.tickTimers();
+    _ = m.step();
+
+    try std.testing.expectEqual(@as(u8, 4), m.cpu.v[0x4]);
+    try std.testing.expectEqual(@as(u8, 4), m.timing.delay_timer);
+}
+
+test "FX1E adds VX to I without wrap and leaves VF untouched" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.i = 0x300;
+    m.cpu.v[0x3] = 0x05;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0xF31E}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x305), m.cpu.i);
+    try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX1E wraps I at 16 bits and leaves VF untouched (vanilla VIP — no carry write)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.i = 0xFFFF;
+    m.cpu.v[0x3] = 0x01;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0xF31E}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x0000), m.cpu.i);
+    try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0xF]);
+}
+
+test "FX29 points I at the 5-byte fontset glyph for each hex digit 0..F" {
+    // Expected glyph bytes mirror the FONTSET table in bus.zig — the test
+    // catches both an incorrect base address and an incorrect stride.
+    const glyphs = [16][5]u8{
+        .{ 0xF0, 0x90, 0x90, 0x90, 0xF0 }, // 0
+        .{ 0x20, 0x60, 0x20, 0x20, 0x70 }, // 1
+        .{ 0xF0, 0x10, 0xF0, 0x80, 0xF0 }, // 2
+        .{ 0xF0, 0x10, 0xF0, 0x10, 0xF0 }, // 3
+        .{ 0x90, 0x90, 0xF0, 0x10, 0x10 }, // 4
+        .{ 0xF0, 0x80, 0xF0, 0x10, 0xF0 }, // 5
+        .{ 0xF0, 0x80, 0xF0, 0x90, 0xF0 }, // 6
+        .{ 0xF0, 0x10, 0x20, 0x40, 0x40 }, // 7
+        .{ 0xF0, 0x90, 0xF0, 0x90, 0xF0 }, // 8
+        .{ 0xF0, 0x90, 0xF0, 0x10, 0xF0 }, // 9
+        .{ 0xF0, 0x90, 0xF0, 0x90, 0x90 }, // A
+        .{ 0xE0, 0x90, 0xE0, 0x90, 0xE0 }, // B
+        .{ 0xF0, 0x80, 0x80, 0x80, 0xF0 }, // C
+        .{ 0xE0, 0x90, 0x90, 0x90, 0xE0 }, // D
+        .{ 0xF0, 0x80, 0xF0, 0x80, 0xF0 }, // E
+        .{ 0xF0, 0x80, 0xF0, 0x80, 0x80 }, // F
+    };
+    for (glyphs, 0..) |expected, digit| {
+        var m = Machine.init(.{});
+        defer m.deinit();
+        m.cpu.v[0x3] = @intCast(digit);
+        try m.loadRom(&assemble(.{0xF329}));
+
+        try std.testing.expectEqual(StepResult.ran, m.step());
+
+        try std.testing.expectEqualSlices(u8, &expected, m.bus.ram[m.cpu.i .. m.cpu.i + FONT_GLYPH_BYTES]);
+    }
+}
+
+test "FX18 falls through silently — advances PC, leaves V/I/timers untouched (sound timer set lands in M5)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x77;
+    m.cpu.i = 0x321;
+    m.timing.sound_timer = 0xAA;
+    m.timing.delay_timer = 0xBB;
+    try m.loadRom(&assemble(.{0xF318}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    try std.testing.expectEqual(@as(u8, 0x77), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u16, 0x321), m.cpu.i);
+    try std.testing.expectEqual(@as(u8, 0xAA), m.timing.sound_timer);
+    try std.testing.expectEqual(@as(u8, 0xBB), m.timing.delay_timer);
+}
+
+test "FX29 ignores the high nibble of VX (digit selected from low 4 bits only)" {
+    // VX = 0xA5 → glyph index 0x5; without the mask the index would walk past
+    // the end of the fontset and pick up arbitrary RAM.
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0xA5;
+    try m.loadRom(&assemble(.{0xF329}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    const expected = [_]u8{ 0xF0, 0x80, 0xF0, 0x10, 0xF0 };
+    try std.testing.expectEqualSlices(u8, &expected, m.bus.ram[m.cpu.i .. m.cpu.i + FONT_GLYPH_BYTES]);
+}
+
 test "serialize and deserialize roundtrip preserves a live IBM-logo framebuffer" {
     // The hand-set roundtrip test below already covers all 11 fields. This
     // test's value is proving the same discipline survives live DXYN-produced
@@ -1007,15 +1152,20 @@ test "serialize and deserialize roundtrip preserves a live IBM-logo framebuffer"
     try std.testing.expectEqualSlices(u1, &src.framebuffer.pixels, &dst.framebuffer.pixels);
 }
 
-test "serialize and deserialize roundtrip preserves machine state" {
+test "serialize and deserialize roundtrip preserves machine state set by M2.8 timer/I opcodes" {
+    // delay_timer and I are populated via FX15 / FX1E rather than hand-set so
+    // the roundtrip is exercised against state the ROM actually produces.
     var src = Machine.init(.{ .rng_seed = 42 });
     defer src.deinit();
     src.cpu.v[0xA] = 0x55;
+    src.cpu.v[0x3] = 7;
+    src.cpu.v[0x4] = 0x05;
     src.cpu.i = 0x300;
-    try src.loadRom(&assemble(.{0x2456}));
+    try src.loadRom(&assemble(.{ 0xF315, 0xF41E, 0x2456 }));
+    _ = src.step();
+    _ = src.step();
     _ = src.step();
     src.timing.cycles = 1234;
-    src.timing.delay_timer = 7;
     src.timing.sound_timer = 9;
     src.keypad.state = 0x00A0;
     src.keypad.last_released = 0xC;
@@ -1031,10 +1181,10 @@ test "serialize and deserialize roundtrip preserves machine state" {
     try dst.deserialize(&reader);
 
     try std.testing.expectEqual(@as(u8, 0x55), dst.cpu.v[0xA]);
-    try std.testing.expectEqual(@as(u16, 0x300), dst.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x305), dst.cpu.i);
     try std.testing.expectEqual(@as(u16, 0x456), dst.cpu.pc);
     try std.testing.expectEqual(@as(u4, 1), dst.cpu.sp);
-    try std.testing.expectEqual(@as(u16, 0x202), dst.cpu.stack[0]);
+    try std.testing.expectEqual(@as(u16, 0x206), dst.cpu.stack[0]);
     try std.testing.expectEqual(@as(Cycles, 1234), dst.timing.cycles);
     try std.testing.expectEqual(@as(u8, 7), dst.timing.delay_timer);
     try std.testing.expectEqual(@as(u8, 9), dst.timing.sound_timer);
