@@ -70,6 +70,14 @@ jobs:
             echo "core invariant violation: src/core/ imports from src/frontend/"
             exit 1
           fi
+          # Step + trace path must not allocate. Existing test scaffolding uses
+          # std.testing.allocator and std.Io.Writer.Allocating, which are typed
+          # against std.mem.Allocator without naming it — those don't trip the
+          # grep. Naming Allocator or std.heap directly in core would.
+          if grep -rn 'std\.heap\|Allocator' src/core/; then
+            echo "core invariant violation: std.heap or Allocator referenced in src/core/"
+            exit 1
+          fi
 
       - name: Build
         run: nix develop -c zig build

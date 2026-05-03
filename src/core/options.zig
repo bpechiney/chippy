@@ -9,4 +9,5 @@ pub const Options = struct {
     rng_seed: u64 = 0,
     cycles_per_second: u32 = 700,
     trace: ?TraceSink = null,
+    sprite_log: ?TraceSink = null,
 };
