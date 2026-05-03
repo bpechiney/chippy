@@ -46,3 +46,26 @@ locally.
   for a comfortable safety margin while keeping the test sub-millisecond.
   The committed golden bytes match Timendus's published reference
   screenshot pixel-for-pixel.
+
+## `quirks.ch8`
+
+- **Source:** `bin/5-quirks.ch8` from
+  [Timendus/chip8-test-suite](https://github.com/Timendus/chip8-test-suite),
+  retrieved 2026-05-03.
+- **License:** GPL-3.0, matching this repo's own license.
+- **Underlying authorship:** Timendus's quirks-test ROM (fifth bundled
+  test). Verifies all six CHIP-8 quirk gates against a per-platform
+  preset: VF reset on logical, FX55/FX65 I increment, vBlank wait on
+  draw, display clipping, shift source, and BNNN jump base. Renders a
+  pass/fail indicator per quirk on a results grid.
+- **SHA-256:** `d839350268a3e73c7a16562b3d23c85aa1b92a567f5f61bd6727b1ea44635679`
+- **Size:** 3232 bytes.
+- **Behavior:** at boot, reads `RAM[0x1FF]` to choose the platform
+  preset (1 = CHIP-8/COSMAC VIP, 2 = SUPER-CHIP modern, 3 = SUPER-CHIP
+  legacy, 4 = XO-CHIP); displays a menu if the byte is zero. Tests then
+  enter a `SKNP V0` / `JP self` wait loop at `$204` until key 0 is not
+  pressed (default keypad state, requires `EXA1` to be implemented).
+  This dependency on `EXA1` is why the keystone gate (`5-quirks.ch8`
+  golden) was deferred from M3.4 to M4 — see issue #71 and the
+  `71-quirks-rom-golden` branch where the ROM + reference screenshot
+  + grilling notes were vendored in advance.
