@@ -78,6 +78,16 @@ jobs:
             echo "core invariant violation: std.heap or Allocator referenced in src/core/"
             exit 1
           fi
+          # Keypad's FX0A claim slot is owned by Keypad. The ADR 0013 invariant
+          # ("awaiting_release is null between FX0A invocations") lives in the
+          # type — only Keypad methods (pollAwaitedKey / isAwaiting / serialize
+          # / deserialize) may touch the field. Zig has no field-level visibility
+          # so this grep is the structural enforcement. Path-pinned (not just
+          # basename) so a future second `keypad.zig` elsewhere can't bypass.
+          if grep -rn 'awaiting_release' src/ | grep -v '^src/core/keypad.zig:'; then
+            echo "core invariant violation: awaiting_release accessed outside src/core/keypad.zig (use Keypad.pollAwaitedKey / isAwaiting / serialize / deserialize)"
+            exit 1
+          fi
 
       - name: Build
         run: nix develop -c zig build
