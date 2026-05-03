@@ -799,6 +799,30 @@ test "EXA1 VX: no-skip when key VX is down (PC += 2)" {
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
+test "EX9E VX: high nibble of VX is masked off — only low nibble selects the key" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x2] = 0xA5;
+    try m.loadRom(&assemble(.{0xE29E}));
+    m.setKey(0x5, true);
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x204), m.cpu.pc);
+}
+
+test "EXA1 VX: high nibble of VX is masked off — only low nibble selects the key" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x2] = 0xF5;
+    try m.loadRom(&assemble(.{0xE2A1}));
+    m.setKey(0x5, true);
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
 test "8XY0 copies VY into VX and leaves other registers untouched" {
     var m = Machine.init(.{});
     defer m.deinit();

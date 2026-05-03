@@ -123,6 +123,11 @@ pub fn disasm(opcode: u16) DisasmEntry {
             .y = decode.opY(opcode),
             .n = decode.opN(opcode),
         },
+        0xE000 => switch (decode.opNN(opcode)) {
+            0x9E => .{ .mnemonic = "SKP VX", .x = decode.opX(opcode) },
+            0xA1 => .{ .mnemonic = "SKNP VX", .x = decode.opX(opcode) },
+            else => DisasmEntry.unknown,
+        },
         0xF000 => switch (decode.opNN(opcode)) {
             0x07 => .{ .mnemonic = "LD VX, DT", .x = decode.opX(opcode) },
             0x15 => .{ .mnemonic = "LD DT, VX", .x = decode.opX(opcode) },
@@ -300,6 +305,23 @@ test "disasm(0xC5AB) returns RND VX, NN with x and nn populated" {
     try std.testing.expectEqualStrings("RND VX, NN", e.mnemonic);
     try std.testing.expectEqual(@as(u4, 0x5), e.x);
     try std.testing.expectEqual(@as(u8, 0xAB), e.nn);
+}
+
+test "disasm(0xE39E) returns SKP VX with x populated" {
+    const e = disasm(0xE39E);
+    try std.testing.expectEqualStrings("SKP VX", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+}
+
+test "disasm(0xE3A1) returns SKNP VX with x populated" {
+    const e = disasm(0xE3A1);
+    try std.testing.expectEqualStrings("SKNP VX", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+}
+
+test "disasm(0xE300) returns the unknown sentinel for non-canonical EXNN low byte" {
+    const e = disasm(0xE300);
+    try std.testing.expectEqualStrings("???", e.mnemonic);
 }
 
 test "disasm(0xF307) returns LD VX, DT with x populated" {
