@@ -14,6 +14,7 @@ const Options = @import("options.zig").Options;
 const rom = @import("rom.zig");
 const assemble = @import("assemble.zig").assemble;
 const decode = @import("decode.zig");
+const trace_mod = @import("trace.zig");
 
 pub const StepResult = enum { ran, waiting_for_vblank, halted };
 
@@ -49,8 +50,12 @@ pub const Machine = struct {
     }
 
     pub fn step(self: *Machine) StepResult {
+        const pre_pc = self.cpu.pc;
         const opcode = self.bus.read16(self.cpu.pc);
         self.cpu.pc +%= 2;
+        // Threaded into emitTrace so DRW VF, ... renders the pre-step coord
+        // value instead of the post-step collision flag.
+        var draw: ?trace_mod.DrawOutcome = null;
         switch (opcode & 0xF000) {
             0x0000 => switch (opcode) {
                 0x00E0 => self.framebuffer.clear(),
@@ -160,6 +165,8 @@ pub const Machine = struct {
                 for (0..n) |j| sprite[j] = self.bus.read8(self.cpu.i +% @as(u16, @intCast(j)));
                 const collided = self.framebuffer.xorSprite(x, y, sprite[0..n]);
                 self.cpu.v[0xF] = @intFromBool(collided);
+                self.emitSpriteLog(x, y, n, collided);
+                draw = .{ .x = x, .y = y, .n = n, .collision = collided };
             },
             0xF000 => switch (decode.opNN(opcode)) {
                 0x07 => self.cpu.v[decode.opX(opcode)] = self.timing.delay_timer,
@@ -192,7 +199,30 @@ pub const Machine = struct {
             },
             else => {},
         }
+        self.emitTrace(pre_pc, opcode, draw);
         return .ran;
+    }
+
+    fn emitTrace(self: *const Machine, pre_pc: u16, opcode: u16, draw: ?trace_mod.DrawOutcome) void {
+        const sink = self.options.trace orelse return;
+        // 128 bytes is sized for the longest line the M2.10 token set produces,
+        // with headroom for future state-delta tokens. A buffer overflow here
+        // would be a chippy bug, not ROM input — fail-open and skip the line.
+        var buf: [128]u8 = undefined;
+        const line = trace_mod.formatTraceLine(&buf, pre_pc, opcode, .{
+            .cpu = &self.cpu,
+            .delay_timer = self.timing.delay_timer,
+            .draw = draw,
+        }) catch return;
+        sink.write(sink.ctx, line);
+    }
+
+    fn emitSpriteLog(self: *const Machine, x: u8, y: u8, n: u4, collision: bool) void {
+        const sink = self.options.sprite_log orelse return;
+        // Sized like emitTrace's buffer; same fail-open rationale.
+        var buf: [64]u8 = undefined;
+        const line = trace_mod.formatSpriteLog(&buf, self.timing.cycles, x, y, n, collision) catch return;
+        sink.write(sink.ctx, line);
     }
 
     pub fn runCycles(self: *Machine, n: u32) Cycles {
@@ -1372,4 +1402,205 @@ test "FX65 with I past 0xFFF wraps RAM addressing at 12 bits rather than panicki
     try std.testing.expectEqual(@as(u8, 0x42), m.cpu.v[0x0]);
     try std.testing.expectEqual(@as(u8, 0x77), m.cpu.v[0x1]);
     try std.testing.expectEqual(@as(u16, 0x0000), m.cpu.i);
+}
+
+// Test-only sink that concatenates every write into a fixed buffer and
+// counts calls. The comptime `is_test` branch makes the strip explicit:
+// non-test builds resolve `BufferSink` to `void`, so any accidental use
+// outside a test block becomes a compile error rather than silent dead code.
+const BufferSink = if (@import("builtin").is_test) struct {
+    buf: []u8,
+    len: usize = 0,
+    write_count: usize = 0,
+
+    fn writeFn(ctx: *anyopaque, line: []const u8) void {
+        const self: *BufferSink = @ptrCast(@alignCast(ctx));
+        @memcpy(self.buf[self.len .. self.len + line.len], line);
+        self.len += line.len;
+        self.write_count += 1;
+    }
+
+    fn sink(self: *BufferSink) trace_mod.TraceSink {
+        return .{ .write = writeFn, .ctx = self };
+    }
+
+    fn slice(self: *const BufferSink) []const u8 {
+        return self.buf[0..self.len];
+    }
+} else void;
+
+test "trace writer emits one line per cycle in the frozen XXXX:OOOO MNEMONIC <state-delta> format" {
+    // Format frozen this PR: future state-delta tokens may extend the set
+    // (BCD, ST, etc.) but never reorder. The four ROM ops here pin the
+    // V[X]=, I=, PC= tokens and the V<hex> / 0xNN / 0xNNN substitutions.
+    var buf: [1024]u8 = undefined;
+    var sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .trace = sink_state.sink() });
+    defer m.deinit();
+    try m.loadRom(&assemble(.{ 0x6A42, 0x7A01, 0xA300, 0x1234 }));
+
+    _ = m.runCycles(4);
+
+    const expected =
+        "0200:6A42 LD VA, 0x42 V[A]=0x42\n" ++
+        "0202:7A01 ADD VA, 0x01 V[A]=0x43\n" ++
+        "0204:A300 LD I, 0x300 I=0x300\n" ++
+        "0206:1234 JP 0x234 PC=0x234\n";
+    try std.testing.expectEqualStrings(expected, sink_state.slice());
+    try std.testing.expectEqual(@as(usize, 4), sink_state.write_count);
+}
+
+test "trace writer is zero-cost when null: cpu/framebuffer/timing state byte-identical to a non-null run" {
+    // Same ROM driven twice; the only configuration difference is the trace
+    // sink. Byte-identical post-state proves the trace path has no observable
+    // side effect on the machine — load-bearing for ADR 0006's "zero-cost
+    // when unused" promise.
+    const program = assemble(.{
+        0x6042, 0x6101, 0x8014, 0xA300, 0xD011, 0xD011, 0x1234,
+    });
+
+    var no_trace = Machine.init(.{});
+    defer no_trace.deinit();
+    no_trace.bus.ram[0x300] = 0xFF;
+    try no_trace.loadRom(&program);
+    _ = no_trace.runCycles(7);
+
+    var buf: [1024]u8 = undefined;
+    var sink_state: BufferSink = .{ .buf = &buf };
+    var with_trace = Machine.init(.{ .trace = sink_state.sink() });
+    defer with_trace.deinit();
+    with_trace.bus.ram[0x300] = 0xFF;
+    try with_trace.loadRom(&program);
+    _ = with_trace.runCycles(7);
+
+    try std.testing.expectEqualSlices(u8, &no_trace.cpu.v, &with_trace.cpu.v);
+    try std.testing.expectEqual(no_trace.cpu.i, with_trace.cpu.i);
+    try std.testing.expectEqual(no_trace.cpu.pc, with_trace.cpu.pc);
+    try std.testing.expectEqual(no_trace.cpu.sp, with_trace.cpu.sp);
+    try std.testing.expectEqualSlices(u16, &no_trace.cpu.stack, &with_trace.cpu.stack);
+    try std.testing.expectEqualSlices(u1, &no_trace.framebuffer.pixels, &with_trace.framebuffer.pixels);
+    try std.testing.expectEqual(no_trace.timing.delay_timer, with_trace.timing.delay_timer);
+    try std.testing.expectEqual(no_trace.timing.cycles, with_trace.timing.cycles);
+}
+
+test "sprite-draw log emits one record per DXYN with cycle, x, y, n, collision" {
+    // 3-op ROM: A300 sets I to a sentinel sprite byte (0xFF, pre-written),
+    // then DRW V0,V0,1 twice. First draw lights 8 pixels (col=0); second
+    // erases them (col=1). cycle=1 / cycle=2 because timing.cycles is
+    // bumped *after* each step in runCycles, so DXYN sees the post-bump
+    // count of preceding cycles.
+    var buf: [256]u8 = undefined;
+    var sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .sprite_log = sink_state.sink() });
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    try m.loadRom(&assemble(.{ 0xA300, 0xD001, 0xD001 }));
+
+    _ = m.runCycles(3);
+
+    const expected =
+        "cycle=1 x=0 y=0 n=1 col=0\n" ++
+        "cycle=2 x=0 y=0 n=1 col=1\n";
+    try std.testing.expectEqualStrings(expected, sink_state.slice());
+    try std.testing.expectEqual(@as(usize, 2), sink_state.write_count);
+}
+
+test "trace state-delta tokens render as locked: FB-CLEAR, V[X]=, VF=, DT=, I=, FB-XOR, (no-op)" {
+    // Pins the rest of the frozen token set the tracer-bullet test doesn't
+    // reach. Single ROM threads CLS → LD → ADD (VF write) → LD DT, V0 → LD I →
+    // DRW → SYS so every locked state-delta token appears exactly once.
+    var buf: [1024]u8 = undefined;
+    var sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .trace = sink_state.sink() });
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    m.bus.ram[0x301] = 0xFF;
+    try m.loadRom(&assemble(.{
+        0x00E0, 0x6005, 0x6103, 0x8014, 0xF015, 0xA300, 0xD012, 0x0123,
+    }));
+
+    _ = m.runCycles(8);
+
+    const expected =
+        "0200:00E0 CLS FB-CLEAR\n" ++
+        "0202:6005 LD V0, 0x05 V[0]=0x05\n" ++
+        "0204:6103 LD V1, 0x03 V[1]=0x03\n" ++
+        "0206:8014 ADD V0, V1 V[0]=0x08 VF=0x00\n" ++
+        "0208:F015 LD DT, V0 DT=0x08\n" ++
+        "020A:A300 LD I, 0x300 I=0x300\n" ++
+        "020C:D012 DRW V0, V1, 0x2 FB-XOR x=8 y=3 n=2 col=0\n" ++
+        "020E:0123 SYS 0x123 (no-op)\n";
+    try std.testing.expectEqualStrings(expected, sink_state.slice());
+}
+
+test "trace DXYN renders the pre-step coord even when X- or Y-reg is VF (collision-flag overwrite)" {
+    // DXYN writes V[F] = collision before the trace path runs. A naive impl
+    // that re-reads cpu.v[0xF] post-step would render the collision flag
+    // instead of the pre-step value the draw used as the coordinate. Vanilla
+    // ROMs rarely use VF as a coord, but valid CHIP-8 programs can — this
+    // pins the format-frozen behavior.
+    var buf: [256]u8 = undefined;
+    var sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .trace = sink_state.sink() });
+    defer m.deinit();
+    m.cpu.v[0xF] = 5;
+    m.bus.ram[0x300] = 0xFF;
+    try m.loadRom(&assemble(.{ 0xA300, 0xDFF1 }));
+
+    _ = m.runCycles(2);
+
+    const out = sink_state.slice();
+    // Pre-step V[F]=5, so DRW VF, VF, 1 draws at (5, 5) with col=0. Buggy
+    // post-step read would render x=0 y=0 because V[F] is now the collision flag.
+    try std.testing.expect(std.mem.indexOf(u8, out, "FB-XOR x=5 y=5 n=1 col=0") != null);
+}
+
+test "trace mnemonic substitution respects word boundaries: AND, RND, SNE keep their literal Ns" {
+    // The placeholder substitutor must only rewrite N/NN/NNN/VX/VY at word
+    // boundaries. A naive impl that matched 'N' anywhere would clobber the
+    // 'N' inside AND, RND, SNE, SUBN — those mnemonics would render with
+    // bogus hex spliced into the middle of the opcode name.
+    var buf: [1024]u8 = undefined;
+    var sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .trace = sink_state.sink(), .rng_seed = 0 });
+    defer m.deinit();
+    m.cpu.v[0x1] = 0xAA;
+    m.cpu.v[0x2] = 0x55;
+    m.cpu.v[0x3] = 0x77;
+    try m.loadRom(&assemble(.{ 0x8122, 0xC1FF, 0x9230 }));
+
+    _ = m.runCycles(3);
+
+    const out = sink_state.slice();
+    try std.testing.expect(std.mem.indexOf(u8, out, "AND V1, V2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "RND V1, 0xFF") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "SNE V2, V3") != null);
+}
+
+test "sprite-draw log null sink receives zero writes when DXYN executes" {
+    var buf: [256]u8 = undefined;
+    const sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .sprite_log = null });
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    try m.loadRom(&assemble(.{ 0xA300, 0xD001, 0xD001 }));
+
+    _ = m.runCycles(3);
+
+    try std.testing.expectEqual(@as(usize, 0), sink_state.write_count);
+    try std.testing.expectEqual(@as(usize, 0), sink_state.len);
+}
+
+test "trace writer null sink receives zero writes" {
+    var buf: [256]u8 = undefined;
+    const sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .trace = null });
+    defer m.deinit();
+    try m.loadRom(&assemble(.{ 0x6A42, 0x7A01, 0xA300, 0x1234 }));
+
+    _ = m.runCycles(4);
+
+    // Sentinel: the sink was never wired in, so the buffer is untouched.
+    try std.testing.expectEqual(@as(usize, 0), sink_state.write_count);
+    try std.testing.expectEqual(@as(usize, 0), sink_state.len);
 }
