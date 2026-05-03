@@ -2,7 +2,7 @@
 
 These ROMs are committed verbatim so the verification spine (ADR 0004) is
 self-contained: tests load them at runtime (see the file-level doc in
-`src/core/golden_ibm_logo.zig` for the `@embedFile` package-path constraint
+`src/core/golden_harness.zig` for the `@embedFile` package-path constraint
 that motivates this), and CI re-runs the exact bytes any contributor sees
 locally.
 
