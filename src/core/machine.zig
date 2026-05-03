@@ -50,8 +50,9 @@ pub const Machine = struct {
     }
 
     pub fn step(self: *Machine) StepResult {
-        const pre_pc = self.cpu.pc;
         const opcode = self.bus.read16(self.cpu.pc);
+        if (self.shouldStallForVblank(opcode)) return .waiting_for_vblank;
+        const pre_pc = self.cpu.pc;
         self.cpu.pc +%= 2;
         // Threaded into emitTrace so DRW VF, ... renders the pre-step coord
         // value instead of the post-step collision flag.
@@ -195,6 +196,17 @@ pub const Machine = struct {
         }
         self.emitTrace(pre_pc, opcode, draw);
         return .ran;
+    }
+
+    /// Vanilla VIP `DXYN` stalls the CPU until the next 60 Hz tick before
+    /// drawing — see ADR 0012 for the contract change to `step()` / `runCycles`
+    /// this introduces. Frame boundary is `cycles % cycles_per_frame == 0`,
+    /// matching `runFrame`'s already-shipped budget.
+    fn shouldStallForVblank(self: *const Machine, opcode: u16) bool {
+        if (!self.options.quirks.vblank_wait_on_draw) return false;
+        if ((opcode & 0xF000) != 0xD000) return false;
+        const cycles_per_frame = self.options.cycles_per_second / 60;
+        return self.timing.cycles % cycles_per_frame != 0;
     }
 
     fn emitTrace(self: *const Machine, pre_pc: u16, opcode: u16, draw: ?trace_mod.DrawOutcome) void {
@@ -467,6 +479,70 @@ test "DXYN advances PC by 2" {
     _ = m.step();
 
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "DXYN: vblank_wait_on_draw=true off frame boundary stalls and preserves PC + framebuffer" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xD001}));
+    m.timing.cycles = 1; // cycles_per_frame = 700/60 = 11; 1 % 11 != 0
+
+    const result = m.step();
+
+    try std.testing.expectEqual(StepResult.waiting_for_vblank, result);
+    try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
+    for (0..8) |col| try std.testing.expectEqual(@as(u1, 0), m.framebuffer.get(col, 0));
+}
+
+test "DXYN: vblank_wait_on_draw=true on frame boundary executes immediately" {
+    // Cycle 0 is a frame boundary (0 % 11 == 0). DXYN executes on the spot.
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xD001}));
+
+    const result = m.step();
+
+    try std.testing.expectEqual(StepResult.ran, result);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    for (0..8) |col| try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(col, 0));
+}
+
+test "DXYN: vblank_wait_on_draw=false executes off frame boundary" {
+    var m = Machine.init(.{ .quirks = .{ .vblank_wait_on_draw = false } });
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xD001}));
+    m.timing.cycles = 1; // not on boundary; quirk-off path ignores it
+
+    const result = m.step();
+
+    try std.testing.expectEqual(StepResult.ran, result);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    for (0..8) |col| try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(col, 0));
+}
+
+test "runCycles: vblank_wait_on_draw=true burns stall cycles until DXYN reaches frame boundary" {
+    // DXYN fetched at cycle 1 stalls until cycle 11; runCycles advances
+    // timing.cycles on each stall iteration so the same DXYN re-fetches and
+    // eventually executes when the boundary is reached.
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xD001}));
+    m.timing.cycles = 1;
+
+    const ran = m.runCycles(11);
+
+    try std.testing.expectEqual(@as(u64, 11), ran);
+    try std.testing.expectEqual(@as(u64, 12), m.timing.cycles);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    for (0..8) |col| try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(col, 0));
 }
 
 test "DXYN: display_clipping=false wraps overflowing pixels around the right edge" {
@@ -1616,7 +1692,10 @@ test "sprite-draw log emits one record per DXYN with cycle, x, y, n, collision" 
     // count of preceding cycles.
     var buf: [256]u8 = undefined;
     var sink_state: BufferSink = .{ .buf = &buf };
-    var m = Machine.init(.{ .sprite_log = sink_state.sink() });
+    var m = Machine.init(.{
+        .sprite_log = sink_state.sink(),
+        .quirks = .{ .vblank_wait_on_draw = false },
+    });
     defer m.deinit();
     m.bus.ram[0x300] = 0xFF;
     try m.loadRom(&assemble(.{ 0xA300, 0xD001, 0xD001 }));
@@ -1636,7 +1715,10 @@ test "trace state-delta tokens render as locked: FB-CLEAR, V[X]=, VF=, DT=, I=, 
     // DRW → SYS so every locked state-delta token appears exactly once.
     var buf: [1024]u8 = undefined;
     var sink_state: BufferSink = .{ .buf = &buf };
-    var m = Machine.init(.{ .trace = sink_state.sink() });
+    var m = Machine.init(.{
+        .trace = sink_state.sink(),
+        .quirks = .{ .vblank_wait_on_draw = false },
+    });
     defer m.deinit();
     m.bus.ram[0x300] = 0xFF;
     m.bus.ram[0x301] = 0xFF;
@@ -1666,7 +1748,10 @@ test "trace DXYN renders the pre-step coord even when X- or Y-reg is VF (collisi
     // pins the format-frozen behavior.
     var buf: [256]u8 = undefined;
     var sink_state: BufferSink = .{ .buf = &buf };
-    var m = Machine.init(.{ .trace = sink_state.sink() });
+    var m = Machine.init(.{
+        .trace = sink_state.sink(),
+        .quirks = .{ .vblank_wait_on_draw = false },
+    });
     defer m.deinit();
     m.cpu.v[0xF] = 5;
     m.bus.ram[0x300] = 0xFF;
