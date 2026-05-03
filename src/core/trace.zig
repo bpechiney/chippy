@@ -18,9 +18,21 @@ pub const TraceSink = struct {
     ctx: *anyopaque,
 };
 
+/// Captured at the DXYN call site so the trace state-delta can render the
+/// pre-step Vx/Vy that the draw actually used. Reading these post-step from
+/// `cpu.v` is unsafe when X-reg or Y-reg is `VF`: the collision-flag write
+/// clobbers the coord before the trace path runs.
+pub const DrawOutcome = struct {
+    x: u8,
+    y: u8,
+    n: u4,
+    collision: bool,
+};
+
 pub const Snapshot = struct {
     cpu: *const Cpu,
     delay_timer: u8,
+    draw: ?DrawOutcome = null,
 };
 
 /// `<pre_pc>:<opcode> <mnemonic-with-substitutions> <state-delta>\n`. The
@@ -122,14 +134,12 @@ fn writeStateDelta(w: *std.Io.Writer, opcode: u16, snap: Snapshot) !void {
             }
         },
         0xA000 => try w.print("I=0x{X:0>3}", .{cpu.i}),
-        0xD000 => {
-            // Vx and Vy are not modified by DXYN, so post-step cpu.v[x] is the
-            // pre-step value the draw actually used. VF holds the collision flag.
-            const x_reg = decode.opX(opcode);
-            const y_reg = decode.opY(opcode);
+        0xD000 => if (snap.draw) |d| {
             try w.print("FB-XOR x={d} y={d} n={d} col={d}", .{
-                cpu.v[x_reg], cpu.v[y_reg], decode.opN(opcode), cpu.v[0xF],
+                d.x, d.y, d.n, @intFromBool(d.collision),
             });
+        } else {
+            try w.writeAll("(no-op)");
         },
         0xF000 => switch (decode.opNN(opcode)) {
             0x07 => {

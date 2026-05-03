@@ -53,6 +53,9 @@ pub const Machine = struct {
         const pre_pc = self.cpu.pc;
         const opcode = self.bus.read16(self.cpu.pc);
         self.cpu.pc +%= 2;
+        // Threaded into emitTrace so DRW VF, ... renders the pre-step coord
+        // value instead of the post-step collision flag.
+        var draw: ?trace_mod.DrawOutcome = null;
         switch (opcode & 0xF000) {
             0x0000 => switch (opcode) {
                 0x00E0 => self.framebuffer.clear(),
@@ -163,6 +166,7 @@ pub const Machine = struct {
                 const collided = self.framebuffer.xorSprite(x, y, sprite[0..n]);
                 self.cpu.v[0xF] = @intFromBool(collided);
                 self.emitSpriteLog(x, y, n, collided);
+                draw = .{ .x = x, .y = y, .n = n, .collision = collided };
             },
             0xF000 => switch (decode.opNN(opcode)) {
                 0x07 => self.cpu.v[decode.opX(opcode)] = self.timing.delay_timer,
@@ -195,11 +199,11 @@ pub const Machine = struct {
             },
             else => {},
         }
-        self.emitTrace(pre_pc, opcode);
+        self.emitTrace(pre_pc, opcode, draw);
         return .ran;
     }
 
-    fn emitTrace(self: *const Machine, pre_pc: u16, opcode: u16) void {
+    fn emitTrace(self: *const Machine, pre_pc: u16, opcode: u16, draw: ?trace_mod.DrawOutcome) void {
         const sink = self.options.trace orelse return;
         // 128 bytes is sized for the longest line the M2.10 token set produces,
         // with headroom for future state-delta tokens. A buffer overflow here
@@ -208,12 +212,14 @@ pub const Machine = struct {
         const line = trace_mod.formatTraceLine(&buf, pre_pc, opcode, .{
             .cpu = &self.cpu,
             .delay_timer = self.timing.delay_timer,
+            .draw = draw,
         }) catch return;
         sink.write(sink.ctx, line);
     }
 
     fn emitSpriteLog(self: *const Machine, x: u8, y: u8, n: u4, collision: bool) void {
         const sink = self.options.sprite_log orelse return;
+        // Sized like emitTrace's buffer; same fail-open rationale.
         var buf: [64]u8 = undefined;
         const line = trace_mod.formatSpriteLog(&buf, self.timing.cycles, x, y, n, collision) catch return;
         sink.write(sink.ctx, line);
@@ -1497,6 +1503,56 @@ test "sprite-draw log emits one record per DXYN with cycle, x, y, n, collision" 
         "cycle=2 x=0 y=0 n=1 col=1\n";
     try std.testing.expectEqualStrings(expected, sink_state.slice());
     try std.testing.expectEqual(@as(usize, 2), sink_state.write_count);
+}
+
+test "trace state-delta tokens render as locked: FB-CLEAR, V[X]=, VF=, DT=, I=, FB-XOR, (no-op)" {
+    // Pins the rest of the frozen token set the tracer-bullet test doesn't
+    // reach. Single ROM threads CLS → LD → ADD (VF write) → LD DT, V0 → LD I →
+    // DRW → SYS so every locked state-delta token appears exactly once.
+    var buf: [1024]u8 = undefined;
+    var sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .trace = sink_state.sink() });
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    m.bus.ram[0x301] = 0xFF;
+    try m.loadRom(&assemble(.{
+        0x00E0, 0x6005, 0x6103, 0x8014, 0xF015, 0xA300, 0xD012, 0x0123,
+    }));
+
+    _ = m.runCycles(8);
+
+    const expected =
+        "0200:00E0 CLS FB-CLEAR\n" ++
+        "0202:6005 LD V0, 0x05 V[0]=0x05\n" ++
+        "0204:6103 LD V1, 0x03 V[1]=0x03\n" ++
+        "0206:8014 ADD V0, V1 V[0]=0x08 VF=0x00\n" ++
+        "0208:F015 LD DT, V0 DT=0x08\n" ++
+        "020A:A300 LD I, 0x300 I=0x300\n" ++
+        "020C:D012 DRW V0, V1, 0x2 FB-XOR x=8 y=3 n=2 col=0\n" ++
+        "020E:0123 SYS 0x123 (no-op)\n";
+    try std.testing.expectEqualStrings(expected, sink_state.slice());
+}
+
+test "trace DXYN renders the pre-step coord even when X- or Y-reg is VF (collision-flag overwrite)" {
+    // DXYN writes V[F] = collision before the trace path runs. A naive impl
+    // that re-reads cpu.v[0xF] post-step would render the collision flag
+    // instead of the pre-step value the draw used as the coordinate. Vanilla
+    // ROMs rarely use VF as a coord, but valid CHIP-8 programs can — this
+    // pins the format-frozen behavior.
+    var buf: [256]u8 = undefined;
+    var sink_state: BufferSink = .{ .buf = &buf };
+    var m = Machine.init(.{ .trace = sink_state.sink() });
+    defer m.deinit();
+    m.cpu.v[0xF] = 5;
+    m.bus.ram[0x300] = 0xFF;
+    try m.loadRom(&assemble(.{ 0xA300, 0xDFF1 }));
+
+    _ = m.runCycles(2);
+
+    const out = sink_state.slice();
+    // Pre-step V[F]=5, so DRW VF, VF, 1 draws at (5, 5) with col=0. Buggy
+    // post-step read would render x=0 y=0 because V[F] is now the collision flag.
+    try std.testing.expect(std.mem.indexOf(u8, out, "FB-XOR x=5 y=5 n=1 col=0") != null);
 }
 
 test "trace mnemonic substitution respects word boundaries: AND, RND, SNE keep their literal Ns" {
