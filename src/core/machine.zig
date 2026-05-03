@@ -184,6 +184,11 @@ pub const Machine = struct {
             },
             0xF000 => switch (decode.opNN(opcode)) {
                 0x07 => self.cpu.v[decode.opX(opcode)] = self.timing.delay_timer,
+                0x0A => if (self.keypad.consumeLastReleased()) |key| {
+                    self.cpu.v[decode.opX(opcode)] = key;
+                } else {
+                    self.cpu.pc = pre_pc;
+                },
                 0x15 => self.timing.delay_timer = self.cpu.v[decode.opX(opcode)],
                 0x1E => self.cpu.i +%= self.cpu.v[decode.opX(opcode)],
                 0x29 => self.cpu.i = FONTSET_ADDRESS + FONT_GLYPH_BYTES * @as(u16, self.cpu.v[decode.opX(opcode)] & 0x0F),
@@ -1303,6 +1308,39 @@ test "0NNN (non-00E0) is a silent no-op that only advances PC" {
 
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
     try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(10, 5));
+}
+
+test "FX0A blocks while no key has been released — PC stays put, VX untouched" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x5] = 0xAB;
+    try m.loadRom(&assemble(.{0xF50A}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
+    try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0x5]);
+}
+
+test "FX0A reads the last-released key into VX, advances PC, and clears the latch" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    try m.loadRom(&assemble(.{ 0xF50A, 0xF50A }));
+
+    // Block once with no key released, then press + release key 0x7.
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u16, 0x200), m.cpu.pc);
+    m.setKey(0x7, true);
+    m.setKey(0x7, false);
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+    try std.testing.expectEqual(@as(u8, 0x07), m.cpu.v[0x5]);
+
+    // Re-blocks: latch is consumed on read.
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
 test "FX07 loads the delay timer into VX" {

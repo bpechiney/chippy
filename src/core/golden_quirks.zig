@@ -10,14 +10,20 @@
 //! "wait for key 0 release" idiom) self-clears in 16 iterations with the
 //! default-empty keypad — see issue #79's pre-flight trace.
 //!
-//! `N = 15000` chosen empirically per the M2.11 procedure: the results
-//! grid stabilizes by cycle ~1000 (only the cursor-blink at (9, 31)
-//! oscillates afterward via XOR-DRW). The cursor-blink phase produces
-//! two distinct framebuffer hashes — call them A (cursor visible) and B
-//! (cursor erased). N=15000 lands deep inside the second A-plateau
-//! (consecutive cycle counts 11 000–50 000+ all hash A, ≥ 40 000-cycle
-//! window) — comfortable safety margin against future cycle-budget
-//! tweaks. Test runtime is sub-millisecond.
+//! Why `runFrame` (not `runCycles`): this ROM uses the delay timer for
+//! splash pacing, and FX0A to wait for input before restarting the test
+//! cycle. `runCycles` advances the CPU but **does not tick DT/ST** (that
+//! happens only in `runFrame.tick()`); without DT ticking, the splash
+//! never auto-advances. Without FX0A blocking, the post-test wait-for-key
+//! falls through and the ROM endlessly restarts. The combination of
+//! `runFrame` (DT ticks) + working FX0A (post-test stall) produces a
+//! deterministic frozen post-results state.
+//!
+//! `N = 1000` frames chosen empirically per the M2.11 procedure: the
+//! framebuffer reaches the all-six-quirks stable state by frame ~500
+//! (post-test FX0A blocks at PC=0x766, freezing the screen). N=1000
+//! is a 2× safety margin, matching the corax+ test's cycle count for
+//! pattern consistency. Test runtime is sub-millisecond.
 //!
 //! See the file-level doc in `golden_ibm_logo.zig` for the runtime-read /
 //! `@embedFile` package-path constraint that motivates the relative-path
@@ -30,8 +36,8 @@ const display = @import("display.zig");
 const bus_mod = @import("bus.zig");
 
 const ROM_PATH = "tests/test_roms/quirks.ch8";
-const GOLDEN_PATH = "tests/test_goldens/quirks_after_15000_cycles.bin";
-const CYCLE_COUNT: u32 = 15000;
+const GOLDEN_PATH = "tests/test_goldens/quirks_after_1000_frames.bin";
+const FRAME_COUNT: u32 = 1000;
 const PLATFORM_SELECT_ADDR: u12 = 0x1FF;
 const PLATFORM_CHIP8_VIP: u8 = 1;
 const PACKED_BYTES: usize = display.PIXELS / 8;
@@ -58,7 +64,7 @@ fn updateGoldensRequested() bool {
     return std.mem.eql(u8, v, "1");
 }
 
-test "5-quirks: framebuffer after 15000 cycles matches golden (all six VIP quirks pass)" {
+test "5-quirks: framebuffer after 1000 frames matches golden (all six VIP quirks pass)" {
     const cwd = std.Io.Dir.cwd();
     const io = std.testing.io;
 
@@ -69,7 +75,8 @@ test "5-quirks: framebuffer after 15000 cycles matches golden (all six VIP quirk
     defer m.deinit();
     try m.loadRom(rom);
     m.pokeRam(PLATFORM_SELECT_ADDR, PLATFORM_CHIP8_VIP);
-    _ = m.runCycles(CYCLE_COUNT);
+    var i: u32 = 0;
+    while (i < FRAME_COUNT) : (i += 1) m.runFrame();
 
     const actual = packFramebuffer(&m.framebuffer);
 

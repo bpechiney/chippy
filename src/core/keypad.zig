@@ -19,4 +19,13 @@ pub const Keypad = struct {
     pub fn isDown(self: *const Keypad, key: u4) bool {
         return (self.state & (@as(u16, 1) << key)) != 0;
     }
+
+    /// Reads the latch and clears it in one step — `FX0A` is the only caller
+    /// so atomic semantics live here rather than as a get-then-null pattern
+    /// at every callsite.
+    pub fn consumeLastReleased(self: *Keypad) ?u4 {
+        const key = self.last_released;
+        self.last_released = null;
+        return key;
+    }
 };
