@@ -143,6 +143,13 @@ pub const Machine = struct {
                 else => {},
             },
             0xA000 => self.cpu.i = decode.opNNN(opcode),
+            0xB000 => {
+                // M3: gate on Quirks.jump_uses_vx (vanilla = V0, not VX; see #56).
+                self.cpu.pc = decode.opNNN(opcode) +% self.cpu.v[0x0];
+            },
+            0xC000 => {
+                self.cpu.v[decode.opX(opcode)] = self.prng.random().int(u8) & decode.opNN(opcode);
+            },
             0xD000 => {
                 const x = self.cpu.v[decode.opX(opcode)];
                 const y = self.cpu.v[decode.opY(opcode)];
@@ -897,6 +904,65 @@ test "8XYN with non-canonical low nibble is a silent no-op that only advances PC
         try std.testing.expectEqual(@as(u8, 0xEF), m.cpu.v[0xF]);
         try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
     }
+}
+
+test "BNNN sets PC to NNN + V0 (vanilla VIP — V0, not VX)" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x05;
+    try m.loadRom(&assemble(.{0xB456}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u16, 0x45B), m.cpu.pc);
+}
+
+test "BNNN with VX != V0 takes the vanilla path (uses V0, ignores VX)" {
+    // Encoded as 0xBA56 — vanilla reads NNN as the full 12 low bits (0xA56)
+    // and adds V0 (= 0x05) for PC = 0xA5B. The M3 jump_uses_vx quirk would
+    // instead add V[A] (= 0x77) for PC = 0xACD. Setting V0 != V[A] makes the
+    // assertion sensitive to which register was selected.
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x05;
+    m.cpu.v[0xA] = 0x77;
+    try m.loadRom(&assemble(.{0xBA56}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u16, 0xA5B), m.cpu.pc);
+}
+
+test "CXNN with NN=0xFF emits the deterministic prng byte stream for the seeded prng" {
+    // Cross-runner determinism gate for CXNN: with `Options.rng_seed` fixed,
+    // the four sourced bytes must match exactly on every host. The expected
+    // values were captured once locally from std.Random.DefaultPrng
+    // (Xoshiro256) seeded with 0xDEADBEEFCAFEBABE — algorithm is platform-
+    // independent, so the expectations are inlined directly.
+    var m = Machine.init(.{ .rng_seed = 0xDEADBEEFCAFEBABE });
+    defer m.deinit();
+    try m.loadRom(&assemble(.{ 0xC1FF, 0xC2FF, 0xC3FF, 0xC4FF }));
+
+    _ = m.step();
+    _ = m.step();
+    _ = m.step();
+    _ = m.step();
+
+    try std.testing.expectEqual(@as(u8, 0xE0), m.cpu.v[0x1]);
+    try std.testing.expectEqual(@as(u8, 0xC3), m.cpu.v[0x2]);
+    try std.testing.expectEqual(@as(u8, 0x44), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0x18), m.cpu.v[0x4]);
+}
+
+test "CXNN ANDs the random byte with NN (high nibble cleared when NN=0x0F)" {
+    // First seeded byte is 0xE0 (see deterministic-stream test above), so
+    // 0xE0 AND 0x0F = 0x00 — proves both the mask is applied and the high
+    // nibble is cleared.
+    var m = Machine.init(.{ .rng_seed = 0xDEADBEEFCAFEBABE });
+    defer m.deinit();
+    try m.loadRom(&assemble(.{0xC50F}));
+
+    _ = m.step();
+
+    try std.testing.expectEqual(@as(u8, 0x00), m.cpu.v[0x5]);
 }
 
 test "0NNN (non-00E0) is a silent no-op that only advances PC" {
