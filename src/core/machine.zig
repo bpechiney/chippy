@@ -115,11 +115,23 @@ pub const Machine = struct {
                         self.cpu.v[x] = vx -% vy;
                         self.cpu.v[0xF] = @intFromBool(vx >= vy);
                     },
+                    0x6 => {
+                        // M3: gate on Quirks.shift_in_place (vanilla = shift VY into VX; see #56).
+                        const vy = self.cpu.v[y];
+                        self.cpu.v[x] = vy >> 1;
+                        self.cpu.v[0xF] = vy & 0x01;
+                    },
                     0x7 => {
                         const vx = self.cpu.v[x];
                         const vy = self.cpu.v[y];
                         self.cpu.v[x] = vy -% vx;
                         self.cpu.v[0xF] = @intFromBool(vy >= vx);
+                    },
+                    0xE => {
+                        // M3: gate on Quirks.shift_in_place (vanilla = shift VY into VX; see #56).
+                        const vy = self.cpu.v[y];
+                        self.cpu.v[x] = vy << 1;
+                        self.cpu.v[0xF] = (vy >> 7) & 0x01;
                     },
                     else => {},
                 }
@@ -769,6 +781,95 @@ test "8XY7 with X=0xF stores the no-borrow flag in VF, not the arithmetic result
     m.cpu.v[0xF] = 0x05;
     m.cpu.v[0xA] = 0x10;
     try m.loadRom(&assemble(.{0x8FA7}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+}
+
+test "8XY6 SHRs VY into VX and stores the popped LSB (0) in VF" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    // VX != VY before the step distinguishes vanilla VIP semantics from the
+    // M3 shift-in-place quirk — if shift_in_place were prematurely wired,
+    // VX would shift its own value (0xAB >> 1 = 0x55), not VY's.
+    m.cpu.v[0x3] = 0xAB;
+    m.cpu.v[0xA] = 0b1100_1010;
+    m.cpu.v[0xF] = 0xCD;
+    try m.loadRom(&assemble(.{0x83A6}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b0110_0101), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0b1100_1010), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY6 SHRs VY into VX and stores the popped LSB (1) in VF" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0xAB;
+    m.cpu.v[0xA] = 0b1100_1011;
+    m.cpu.v[0xF] = 0x00;
+    try m.loadRom(&assemble(.{0x83A6}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b0110_0101), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY6 with X=0xF stores the popped LSB in VF, not the shifted byte" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0xF] = 0x00;
+    m.cpu.v[0xA] = 0b1100_1011;
+    try m.loadRom(&assemble(.{0x8FA6}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+}
+
+test "8XYE SHLs VY into VX and stores the popped MSB (0) in VF" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0xAB;
+    m.cpu.v[0xA] = 0b0101_0011;
+    m.cpu.v[0xF] = 0xCD;
+    try m.loadRom(&assemble(.{0x83AE}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b1010_0110), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0b0101_0011), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XYE SHLs VY into VX and stores the popped MSB (1) in VF" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0xAB;
+    m.cpu.v[0xA] = 0b1100_1010;
+    m.cpu.v[0xF] = 0x00;
+    try m.loadRom(&assemble(.{0x83AE}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b1001_0100), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XYE with X=0xF stores the popped MSB in VF, not the shifted byte" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0xF] = 0x00;
+    m.cpu.v[0xA] = 0b1100_1010;
+    try m.loadRom(&assemble(.{0x8FAE}));
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
