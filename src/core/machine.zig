@@ -11,6 +11,7 @@ const Cycles = timing_mod.Cycles;
 const Options = @import("options.zig").Options;
 const rom = @import("rom.zig");
 const assemble = @import("assemble.zig").assemble;
+const decode = @import("decode.zig");
 
 pub const StepResult = enum { ran, waiting_for_vblank, halted };
 
@@ -57,34 +58,34 @@ pub const Machine = struct {
                 },
                 else => {},
             },
-            0x1000 => self.cpu.pc = opcode & 0x0FFF,
+            0x1000 => self.cpu.pc = decode.opNNN(opcode),
             0x2000 => {
                 self.cpu.stack[self.cpu.sp] = self.cpu.pc;
                 self.cpu.sp +%= 1;
-                self.cpu.pc = opcode & 0x0FFF;
+                self.cpu.pc = decode.opNNN(opcode);
             },
             0x3000 => {
-                if (self.cpu.v[(opcode & 0x0F00) >> 8] == @as(u8, @truncate(opcode & 0x00FF))) {
+                if (self.cpu.v[decode.opX(opcode)] == decode.opNN(opcode)) {
                     self.cpu.pc +%= 2;
                 }
             },
             0x4000 => {
-                if (self.cpu.v[(opcode & 0x0F00) >> 8] != @as(u8, @truncate(opcode & 0x00FF))) {
+                if (self.cpu.v[decode.opX(opcode)] != decode.opNN(opcode)) {
                     self.cpu.pc +%= 2;
                 }
             },
-            0x5000 => switch (opcode & 0x000F) {
-                0x0 => if (self.cpu.v[(opcode & 0x0F00) >> 8] == self.cpu.v[(opcode & 0x00F0) >> 4]) {
+            0x5000 => switch (decode.opN(opcode)) {
+                0x0 => if (self.cpu.v[decode.opX(opcode)] == self.cpu.v[decode.opY(opcode)]) {
                     self.cpu.pc +%= 2;
                 },
                 else => {},
             },
-            0x6000 => self.cpu.v[(opcode & 0x0F00) >> 8] = @truncate(opcode & 0x00FF),
-            0x7000 => self.cpu.v[(opcode & 0x0F00) >> 8] +%= @truncate(opcode & 0x00FF),
+            0x6000 => self.cpu.v[decode.opX(opcode)] = decode.opNN(opcode),
+            0x7000 => self.cpu.v[decode.opX(opcode)] +%= decode.opNN(opcode),
             0x8000 => {
-                const x = (opcode & 0x0F00) >> 8;
-                const y = (opcode & 0x00F0) >> 4;
-                switch (opcode & 0x000F) {
+                const x = decode.opX(opcode);
+                const y = decode.opY(opcode);
+                switch (decode.opN(opcode)) {
                     0x0 => self.cpu.v[x] = self.cpu.v[y],
                     0x1 => {
                         self.cpu.v[x] |= self.cpu.v[y];
@@ -104,17 +105,17 @@ pub const Machine = struct {
                     else => {},
                 }
             },
-            0x9000 => switch (opcode & 0x000F) {
-                0x0 => if (self.cpu.v[(opcode & 0x0F00) >> 8] != self.cpu.v[(opcode & 0x00F0) >> 4]) {
+            0x9000 => switch (decode.opN(opcode)) {
+                0x0 => if (self.cpu.v[decode.opX(opcode)] != self.cpu.v[decode.opY(opcode)]) {
                     self.cpu.pc +%= 2;
                 },
                 else => {},
             },
-            0xA000 => self.cpu.i = opcode & 0x0FFF,
+            0xA000 => self.cpu.i = decode.opNNN(opcode),
             0xD000 => {
-                const x = self.cpu.v[(opcode & 0x0F00) >> 8];
-                const y = self.cpu.v[(opcode & 0x00F0) >> 4];
-                const n = opcode & 0x000F;
+                const x = self.cpu.v[decode.opX(opcode)];
+                const y = self.cpu.v[decode.opY(opcode)];
+                const n = decode.opN(opcode);
                 var sprite: [15]u8 = undefined;
                 for (0..n) |j| sprite[j] = self.bus.read8(self.cpu.i +% @as(u16, @intCast(j)));
                 const collided = self.framebuffer.xorSprite(x, y, sprite[0..n]);

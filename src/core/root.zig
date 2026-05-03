@@ -14,6 +14,11 @@ pub const DisasmEntry = @import("disasm.zig").DisasmEntry;
 pub const RomError = @import("rom.zig").RomError;
 pub const ROM_MAX_BYTES = @import("bus.zig").ROM_MAX_BYTES;
 pub const assemble = @import("assemble.zig").assemble;
+pub const opX = @import("decode.zig").opX;
+pub const opY = @import("decode.zig").opY;
+pub const opN = @import("decode.zig").opN;
+pub const opNN = @import("decode.zig").opNN;
+pub const opNNN = @import("decode.zig").opNNN;
 
 test {
     _ = @import("machine.zig");
@@ -29,5 +34,6 @@ test {
     _ = @import("trace.zig");
     _ = @import("options.zig");
     _ = @import("assemble.zig");
+    _ = @import("decode.zig");
     _ = @import("golden_ibm_logo.zig");
 }
