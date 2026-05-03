@@ -24,69 +24,25 @@
 //! (post-test FX0A blocks at PC=0x766, freezing the screen). N=1000
 //! is a 2× safety margin, matching the corax+ test's cycle count for
 //! pattern consistency. Test runtime is sub-millisecond.
-//!
-//! See the file-level doc in `golden_ibm_logo.zig` for the runtime-read /
-//! `@embedFile` package-path constraint that motivates the relative-path
-//! load pattern shared with that test.
 
-const std = @import("std");
 const Machine = @import("machine.zig").Machine;
-const Framebuffer = @import("display.zig").Framebuffer;
-const display = @import("display.zig");
-const bus_mod = @import("bus.zig");
+const harness = @import("golden_harness.zig");
 
 const ROM_PATH = "tests/test_roms/quirks.ch8";
 const GOLDEN_PATH = "tests/test_goldens/quirks_after_1000_frames.bin";
 const FRAME_COUNT: u32 = 1000;
 const PLATFORM_SELECT_ADDR: u12 = 0x1FF;
 const PLATFORM_CHIP8_VIP: u8 = 1;
-const PACKED_BYTES: usize = display.PIXELS / 8;
 
-/// Row-major, MSB = leftmost pixel — the standard CHIP-8 sprite-pack layout,
-/// chosen so a hex dump of the snapshot reads visually like the screen.
-fn packFramebuffer(fb: *const Framebuffer) [PACKED_BYTES]u8 {
-    var out: [PACKED_BYTES]u8 = [_]u8{0} ** PACKED_BYTES;
-    for (0..display.HEIGHT) |row| {
-        for (0..display.WIDTH / 8) |byte_col| {
-            var b: u8 = 0;
-            for (0..8) |bit| {
-                const px = fb.get(byte_col * 8 + bit, row);
-                b |= @as(u8, px) << @intCast(7 - bit);
-            }
-            out[row * (display.WIDTH / 8) + byte_col] = b;
-        }
-    }
-    return out;
-}
-
-fn updateGoldensRequested() bool {
-    const v = std.testing.environ.getPosix("UPDATE_GOLDENS") orelse return false;
-    return std.mem.eql(u8, v, "1");
+fn selectChip8Vip(m: *Machine) void {
+    m.pokeRam(PLATFORM_SELECT_ADDR, PLATFORM_CHIP8_VIP);
 }
 
 test "5-quirks: framebuffer after 1000 frames matches golden (all six VIP quirks pass)" {
-    const cwd = std.Io.Dir.cwd();
-    const io = std.testing.io;
-
-    const rom = try cwd.readFileAlloc(io, ROM_PATH, std.testing.allocator, .limited(bus_mod.ROM_MAX_BYTES));
-    defer std.testing.allocator.free(rom);
-
-    var m = Machine.init(.{});
-    defer m.deinit();
-    try m.loadRom(rom);
-    m.pokeRam(PLATFORM_SELECT_ADDR, PLATFORM_CHIP8_VIP);
-    var i: u32 = 0;
-    while (i < FRAME_COUNT) : (i += 1) m.runFrame();
-
-    const actual = packFramebuffer(&m.framebuffer);
-
-    if (updateGoldensRequested()) {
-        try cwd.writeFile(io, .{ .sub_path = GOLDEN_PATH, .data = &actual });
-        return;
-    }
-
-    const golden = try cwd.readFileAlloc(io, GOLDEN_PATH, std.testing.allocator, .limited(PACKED_BYTES + 1));
-    defer std.testing.allocator.free(golden);
-
-    try std.testing.expectEqualSlices(u8, golden, &actual);
+    try harness.runAndCompare(.{
+        .rom_path = ROM_PATH,
+        .golden_path = GOLDEN_PATH,
+        .run = .{ .frames = FRAME_COUNT },
+        .pre_run = selectChip8Vip,
+    });
 }
