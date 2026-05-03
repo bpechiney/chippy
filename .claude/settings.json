@@ -4,8 +4,14 @@
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/check-tdd-invoked.sh" },
-          { "type": "command", "command": ".claude/hooks/check-branch-discipline.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-tdd-invoked.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-branch-discipline.sh"
+          }
         ]
       }
     ],
@@ -13,7 +19,10 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/post-merge-cleanup.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-merge-cleanup.sh"
+          }
         ]
       }
     ],
@@ -21,21 +30,33 @@
       {
         "matcher": "startup",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/session-start-sync.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-sync.sh"
+          }
         ]
       },
       {
         "matcher": "resume",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/session-start-sync.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-sync.sh"
+          }
         ]
       },
       {
         "matcher": "clear",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/session-start-sync.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start-sync.sh"
+          }
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true
   }
 }
