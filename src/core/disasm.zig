@@ -8,8 +8,10 @@ const std = @import("std");
 pub const DisasmEntry = struct {
     mnemonic: []const u8,
     nnn: u16 = 0,
-    x: u4 = 0,
     nn: u8 = 0,
+    x: u4 = 0,
+    y: u4 = 0,
+    n: u4 = 0,
 
     pub const unknown = DisasmEntry{ .mnemonic = "???" };
 };
@@ -32,6 +34,12 @@ pub fn disasm(opcode: u16) DisasmEntry {
             .nn = @truncate(opcode & 0x00FF),
         },
         0xA000 => .{ .mnemonic = "LD I, NNN", .nnn = opcode & 0x0FFF },
+        0xD000 => .{
+            .mnemonic = "DRW VX, VY, N",
+            .x = @intCast((opcode & 0x0F00) >> 8),
+            .y = @intCast((opcode & 0x00F0) >> 4),
+            .n = @intCast(opcode & 0x000F),
+        },
         else => DisasmEntry.unknown,
     };
 }
@@ -71,6 +79,14 @@ test "disasm(0xA789) returns LD I, NNN with nnn populated" {
     const e = disasm(0xA789);
     try std.testing.expectEqualStrings("LD I, NNN", e.mnemonic);
     try std.testing.expectEqual(@as(u16, 0x789), e.nnn);
+}
+
+test "disasm(0xD123) returns DRW VX, VY, N with x, y, n populated" {
+    const e = disasm(0xD123);
+    try std.testing.expectEqualStrings("DRW VX, VY, N", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x1), e.x);
+    try std.testing.expectEqual(@as(u4, 0x2), e.y);
+    try std.testing.expectEqual(@as(u4, 0x3), e.n);
 }
 
 test "disasm(0xFFFF) still returns the unknown sentinel" {
