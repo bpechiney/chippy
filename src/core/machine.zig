@@ -158,7 +158,8 @@ pub const Machine = struct {
                 const n = decode.opN(opcode);
                 var sprite: [15]u8 = undefined;
                 for (0..n) |j| sprite[j] = self.bus.read8(self.cpu.i +% @as(u16, @intCast(j)));
-                const collided = self.framebuffer.xorSprite(x, y, sprite[0..n]);
+                // Quirk-flag inversion: vanilla VIP clips (display_clipping = true ⇒ wrap = false).
+                const collided = self.framebuffer.xorSprite(x, y, sprite[0..n], !self.options.quirks.display_clipping);
                 self.cpu.v[0xF] = @intFromBool(collided);
                 self.emitSpriteLog(x, y, n, collided);
                 draw = .{ .x = x, .y = y, .n = n, .collision = collided };
@@ -466,6 +467,22 @@ test "DXYN advances PC by 2" {
     _ = m.step();
 
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "DXYN: display_clipping=false wraps overflowing pixels around the right edge" {
+    var m = Machine.init(.{ .quirks = .{ .display_clipping = false } });
+    defer m.deinit();
+    m.bus.ram[0x300] = 0xFF;
+    m.cpu.i = 0x300;
+    m.cpu.v[0x2] = 60;
+    m.cpu.v[0x3] = 0;
+    try m.loadRom(&assemble(.{0xD231}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    for (60..64) |col| try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(col, 0));
+    for (0..4) |col| try std.testing.expectEqual(@as(u1, 1), m.framebuffer.get(col, 0));
+    for (4..60) |col| try std.testing.expectEqual(@as(u1, 0), m.framebuffer.get(col, 0));
 }
 
 test "2NNN pushes PC + 2 onto the return stack and jumps to NNN" {
