@@ -2,6 +2,8 @@ const std = @import("std");
 const Io = std.Io;
 const core = @import("chippy_core");
 const cli = @import("cli.zig");
+const render = @import("render.zig");
+const tui = @import("tui.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -38,8 +40,14 @@ pub fn main(init: std.process.Init) !void {
     defer m.deinit();
     try m.loadRom(rom_bytes);
 
-    try stdout.print("loaded {d} bytes from {s}\n", .{ rom_bytes.len, rom_path });
-    try stdout.flush();
+    if (parsed.print) {
+        _ = m.runCycles(parsed.cycles.?);
+        try render.render(&m.framebuffer, stdout);
+        try stdout.flush();
+        return;
+    }
+
+    try tui.run(io, &m, stdout);
 }
 
 fn readRom(io: Io, allocator: std.mem.Allocator, path: [:0]const u8) ![]u8 {
