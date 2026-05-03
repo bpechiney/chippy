@@ -102,6 +102,25 @@ pub const Machine = struct {
                         // M3: gate on Quirks.vf_reset_on_logical (vanilla = reset; see #38).
                         if (self.options.quirks.vf_reset_on_logical) self.cpu.v[0xF] = 0;
                     },
+                    0x4 => {
+                        const vx = self.cpu.v[x];
+                        const vy = self.cpu.v[y];
+                        const sum = @addWithOverflow(vx, vy);
+                        self.cpu.v[x] = sum[0];
+                        self.cpu.v[0xF] = sum[1];
+                    },
+                    0x5 => {
+                        const vx = self.cpu.v[x];
+                        const vy = self.cpu.v[y];
+                        self.cpu.v[x] = vx -% vy;
+                        self.cpu.v[0xF] = @intFromBool(vx >= vy);
+                    },
+                    0x7 => {
+                        const vx = self.cpu.v[x];
+                        const vy = self.cpu.v[y];
+                        self.cpu.v[x] = vy -% vx;
+                        self.cpu.v[0xF] = @intFromBool(vy >= vx);
+                    },
                     else => {},
                 }
             },
@@ -625,6 +644,135 @@ test "8XY3 XORs VY into VX and resets VF to 0 even when VF was non-zero" {
     try std.testing.expectEqual(@as(u8, 0b0110_1100), m.cpu.v[0xA]);
     try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY4 ADDs VY into VX and clears VF when no carry occurs" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x10;
+    m.cpu.v[0xA] = 0x05;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A4}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x15), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0x05), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY4 wraps at 8 bits and sets VF=1 on carry" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0xFF;
+    m.cpu.v[0xA] = 0x01;
+    m.cpu.v[0xF] = 0x00;
+    try m.loadRom(&assemble(.{0x83A4}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x00), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY4 with X=0xF stores the carry flag in VF, not the arithmetic result" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0xF] = 0xFF;
+    m.cpu.v[0xA] = 0x01;
+    try m.loadRom(&assemble(.{0x8FA4}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+}
+
+test "8XY5 SUBs VY from VX and sets VF=1 (no-borrow) when VX >= VY" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x10;
+    m.cpu.v[0xA] = 0x05;
+    m.cpu.v[0xF] = 0x00;
+    try m.loadRom(&assemble(.{0x83A5}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x0B), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0x05), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY5 wraps at 8 bits and sets VF=0 (borrow) when VX < VY" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x00;
+    m.cpu.v[0xA] = 0x01;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A5}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0xFF), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY5 with X=0xF stores the no-borrow flag in VF, not the arithmetic result" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0xF] = 0x10;
+    m.cpu.v[0xA] = 0x05;
+    try m.loadRom(&assemble(.{0x8FA5}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+}
+
+test "8XY7 stores VY-VX in VX and sets VF=1 (no-borrow) when VY >= VX" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x05;
+    m.cpu.v[0xA] = 0x10;
+    m.cpu.v[0xF] = 0x00;
+    try m.loadRom(&assemble(.{0x83A7}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x0B), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0x10), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY7 wraps at 8 bits and sets VF=0 (borrow) when VY < VX" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0x3] = 0x01;
+    m.cpu.v[0xA] = 0x00;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A7}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0xFF), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY7 with X=0xF stores the no-borrow flag in VF, not the arithmetic result" {
+    var m = Machine.init(.{});
+    defer m.deinit();
+    m.cpu.v[0xF] = 0x05;
+    m.cpu.v[0xA] = 0x10;
+    try m.loadRom(&assemble(.{0x8FA7}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
 }
 
 test "8XYN with non-canonical low nibble is a silent no-op that only advances PC" {

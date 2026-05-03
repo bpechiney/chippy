@@ -75,6 +75,21 @@ pub fn disasm(opcode: u16) DisasmEntry {
                 .x = decode.opX(opcode),
                 .y = decode.opY(opcode),
             },
+            0x4 => .{
+                .mnemonic = "ADD VX, VY",
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
+            },
+            0x5 => .{
+                .mnemonic = "SUB VX, VY",
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
+            },
+            0x7 => .{
+                .mnemonic = "SUBN VX, VY",
+                .x = decode.opX(opcode),
+                .y = decode.opY(opcode),
+            },
             else => DisasmEntry.unknown,
         },
         0x9000 => switch (decode.opN(opcode)) {
@@ -197,6 +212,27 @@ test "disasm(0x83A2) returns AND VX, VY with x and y populated" {
 test "disasm(0x83A3) returns XOR VX, VY with x and y populated" {
     const e = disasm(0x83A3);
     try std.testing.expectEqualStrings("XOR VX, VY", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+    try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0x83A4) returns ADD VX, VY with x and y populated" {
+    const e = disasm(0x83A4);
+    try std.testing.expectEqualStrings("ADD VX, VY", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+    try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0x83A5) returns SUB VX, VY with x and y populated" {
+    const e = disasm(0x83A5);
+    try std.testing.expectEqualStrings("SUB VX, VY", e.mnemonic);
+    try std.testing.expectEqual(@as(u4, 0x3), e.x);
+    try std.testing.expectEqual(@as(u4, 0xA), e.y);
+}
+
+test "disasm(0x83A7) returns SUBN VX, VY with x and y populated" {
+    const e = disasm(0x83A7);
+    try std.testing.expectEqualStrings("SUBN VX, VY", e.mnemonic);
     try std.testing.expectEqual(@as(u4, 0x3), e.x);
     try std.testing.expectEqual(@as(u4, 0xA), e.y);
 }
