@@ -96,17 +96,14 @@ pub const Machine = struct {
                     0x0 => self.cpu.v[x] = self.cpu.v[y],
                     0x1 => {
                         self.cpu.v[x] |= self.cpu.v[y];
-                        // M3: gate on Quirks.vf_reset_on_logical (vanilla = reset; see #38).
                         if (self.options.quirks.vf_reset_on_logical) self.cpu.v[0xF] = 0;
                     },
                     0x2 => {
                         self.cpu.v[x] &= self.cpu.v[y];
-                        // M3: gate on Quirks.vf_reset_on_logical (vanilla = reset; see #38).
                         if (self.options.quirks.vf_reset_on_logical) self.cpu.v[0xF] = 0;
                     },
                     0x3 => {
                         self.cpu.v[x] ^= self.cpu.v[y];
-                        // M3: gate on Quirks.vf_reset_on_logical (vanilla = reset; see #38).
                         if (self.options.quirks.vf_reset_on_logical) self.cpu.v[0xF] = 0;
                     },
                     0x4 => {
@@ -123,10 +120,9 @@ pub const Machine = struct {
                         self.cpu.v[0xF] = @intFromBool(vx >= vy);
                     },
                     0x6 => {
-                        // M3: gate on Quirks.shift_in_place (vanilla = shift VY into VX; see #56).
-                        const vy = self.cpu.v[y];
-                        self.cpu.v[x] = vy >> 1;
-                        self.cpu.v[0xF] = vy & 0x01;
+                        const src = if (self.options.quirks.shift_in_place) self.cpu.v[x] else self.cpu.v[y];
+                        self.cpu.v[x] = src >> 1;
+                        self.cpu.v[0xF] = src & 0x01;
                     },
                     0x7 => {
                         const vx = self.cpu.v[x];
@@ -135,10 +131,9 @@ pub const Machine = struct {
                         self.cpu.v[0xF] = @intFromBool(vy >= vx);
                     },
                     0xE => {
-                        // M3: gate on Quirks.shift_in_place (vanilla = shift VY into VX; see #56).
-                        const vy = self.cpu.v[y];
-                        self.cpu.v[x] = vy << 1;
-                        self.cpu.v[0xF] = (vy >> 7) & 0x01;
+                        const src = if (self.options.quirks.shift_in_place) self.cpu.v[x] else self.cpu.v[y];
+                        self.cpu.v[x] = src << 1;
+                        self.cpu.v[0xF] = (src >> 7) & 0x01;
                     },
                     else => {},
                 }
@@ -151,8 +146,8 @@ pub const Machine = struct {
             },
             0xA000 => self.cpu.i = decode.opNNN(opcode),
             0xB000 => {
-                // M3: gate on Quirks.jump_uses_vx (vanilla = V0, not VX; see #56).
-                self.cpu.pc = decode.opNNN(opcode) +% self.cpu.v[0x0];
+                const reg = if (self.options.quirks.jump_uses_vx) decode.opX(opcode) else 0x0;
+                self.cpu.pc = decode.opNNN(opcode) +% self.cpu.v[reg];
             },
             0xC000 => {
                 self.cpu.v[decode.opX(opcode)] = self.prng.random().int(u8) & decode.opNN(opcode);
@@ -184,16 +179,14 @@ pub const Machine = struct {
                     for (0..@as(usize, x) + 1) |j| {
                         self.bus.write8(self.cpu.i +% @as(u16, @intCast(j)), self.cpu.v[j]);
                     }
-                    // M3: gate on Quirks.no_index_increment (vanilla VIP increments I; see #56).
-                    self.cpu.i +%= @as(u16, x) + 1;
+                    if (!self.options.quirks.no_index_increment) self.cpu.i +%= @as(u16, x) + 1;
                 },
                 0x65 => {
                     const x = decode.opX(opcode);
                     for (0..@as(usize, x) + 1) |j| {
                         self.cpu.v[j] = self.bus.read8(self.cpu.i +% @as(u16, @intCast(j)));
                     }
-                    // M3: gate on Quirks.no_index_increment (vanilla VIP increments I; see #56).
-                    self.cpu.i +%= @as(u16, x) + 1;
+                    if (!self.options.quirks.no_index_increment) self.cpu.i +%= @as(u16, x) + 1;
                 },
                 else => {},
             },
@@ -694,6 +687,20 @@ test "8XY1 ORs VY into VX and resets VF to 0 even when VF was non-zero" {
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
+test "8XY1: vf_reset_on_logical=false leaves VF unchanged after OR" {
+    var m = Machine.init(.{ .quirks = .{ .vf_reset_on_logical = false } });
+    defer m.deinit();
+    m.cpu.v[0x3] = 0b1010_0101;
+    m.cpu.v[0xA] = 0b0110_1100;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A1}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b1110_1101), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0xF]);
+}
+
 test "8XY2 ANDs VY into VX and resets VF to 0 even when VF was non-zero" {
     var m = Machine.init(.{});
     defer m.deinit();
@@ -710,6 +717,20 @@ test "8XY2 ANDs VY into VX and resets VF to 0 even when VF was non-zero" {
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
+test "8XY2: vf_reset_on_logical=false leaves VF unchanged after AND" {
+    var m = Machine.init(.{ .quirks = .{ .vf_reset_on_logical = false } });
+    defer m.deinit();
+    m.cpu.v[0x3] = 0b1010_0101;
+    m.cpu.v[0xA] = 0b0110_1100;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A2}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b0010_0100), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0xF]);
+}
+
 test "8XY3 XORs VY into VX and resets VF to 0 even when VF was non-zero" {
     var m = Machine.init(.{});
     defer m.deinit();
@@ -724,6 +745,20 @@ test "8XY3 XORs VY into VX and resets VF to 0 even when VF was non-zero" {
     try std.testing.expectEqual(@as(u8, 0b0110_1100), m.cpu.v[0xA]);
     try std.testing.expectEqual(@as(u8, 0), m.cpu.v[0xF]);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "8XY3: vf_reset_on_logical=false leaves VF unchanged after XOR" {
+    var m = Machine.init(.{ .quirks = .{ .vf_reset_on_logical = false } });
+    defer m.deinit();
+    m.cpu.v[0x3] = 0b1010_0101;
+    m.cpu.v[0xA] = 0b0110_1100;
+    m.cpu.v[0xF] = 0xAB;
+    try m.loadRom(&assemble(.{0x83A3}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0b1100_1001), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0xAB), m.cpu.v[0xF]);
 }
 
 test "8XY4 ADDs VY into VX and clears VF when no carry occurs" {
@@ -901,6 +936,21 @@ test "8XY6 with X=0xF stores the popped LSB in VF, not the shifted byte" {
     try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
 }
 
+test "8XY6: shift_in_place=true SHRs VX in place and ignores VY" {
+    var m = Machine.init(.{ .quirks = .{ .shift_in_place = true } });
+    defer m.deinit();
+    m.cpu.v[0x3] = 0xAB;
+    m.cpu.v[0xA] = 0b1100_1010;
+    m.cpu.v[0xF] = 0xCD;
+    try m.loadRom(&assemble(.{0x83A6}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x55), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0b1100_1010), m.cpu.v[0xA]);
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+}
+
 test "8XYE SHLs VY into VX and stores the popped MSB (0) in VF" {
     var m = Machine.init(.{});
     defer m.deinit();
@@ -941,6 +991,21 @@ test "8XYE with X=0xF stores the popped MSB in VF, not the shifted byte" {
 
     try std.testing.expectEqual(StepResult.ran, m.step());
 
+    try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
+}
+
+test "8XYE: shift_in_place=true SHLs VX in place and ignores VY" {
+    var m = Machine.init(.{ .quirks = .{ .shift_in_place = true } });
+    defer m.deinit();
+    m.cpu.v[0x3] = 0xAB;
+    m.cpu.v[0xA] = 0b0101_0011;
+    m.cpu.v[0xF] = 0xCD;
+    try m.loadRom(&assemble(.{0x83AE}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    try std.testing.expectEqual(@as(u8, 0x56), m.cpu.v[0x3]);
+    try std.testing.expectEqual(@as(u8, 0b0101_0011), m.cpu.v[0xA]);
     try std.testing.expectEqual(@as(u8, 1), m.cpu.v[0xF]);
 }
 
@@ -990,6 +1055,17 @@ test "BNNN with VX != V0 takes the vanilla path (uses V0, ignores VX)" {
 
     try std.testing.expectEqual(StepResult.ran, m.step());
     try std.testing.expectEqual(@as(u16, 0xA5B), m.cpu.pc);
+}
+
+test "BNNN: jump_uses_vx=true reads V[high nibble of NNN] and ignores V0" {
+    var m = Machine.init(.{ .quirks = .{ .jump_uses_vx = true } });
+    defer m.deinit();
+    m.cpu.v[0x0] = 0x05;
+    m.cpu.v[0xA] = 0x77;
+    try m.loadRom(&assemble(.{0xBA56}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+    try std.testing.expectEqual(@as(u16, 0xACD), m.cpu.pc);
 }
 
 test "CXNN with NN=0xFF emits the deterministic prng byte stream for the seeded prng" {
@@ -1335,6 +1411,22 @@ test "FX55 with X=15 stores V0..VF to RAM[I..I+15] and increments I by 16 (vanil
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
+test "FX55: no_index_increment=true stores V0..VX to RAM[I..] but leaves I unchanged" {
+    var m = Machine.init(.{ .quirks = .{ .no_index_increment = true } });
+    defer m.deinit();
+    for (0..16) |j| m.cpu.v[j] = @as(u8, @intCast(j)) +% 0xA0;
+    m.cpu.i = 0x300;
+    try m.loadRom(&assemble(.{0xFF55}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    for (0..16) |j| {
+        try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.bus.ram[0x300 + j]);
+    }
+    try std.testing.expectEqual(@as(u16, 0x300), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
 test "FX65 with X=0 loads V0 from RAM[I] and increments I by 1 (vanilla VIP)" {
     // Sentinel at V1 proves the bulk-load stops at X (inclusive) — if it ran
     // one register too far, V1 would be clobbered with RAM[I+1].
@@ -1368,6 +1460,22 @@ test "FX65 with X=15 loads V0..VF from RAM[I..I+15] and increments I by 16 (vani
         try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.cpu.v[j]);
     }
     try std.testing.expectEqual(@as(u16, 0x310), m.cpu.i);
+    try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
+}
+
+test "FX65: no_index_increment=true loads V0..VX from RAM[I..] but leaves I unchanged" {
+    var m = Machine.init(.{ .quirks = .{ .no_index_increment = true } });
+    defer m.deinit();
+    m.cpu.i = 0x300;
+    for (0..16) |j| m.bus.ram[0x300 + j] = @as(u8, @intCast(j)) +% 0xA0;
+    try m.loadRom(&assemble(.{0xFF65}));
+
+    try std.testing.expectEqual(StepResult.ran, m.step());
+
+    for (0..16) |j| {
+        try std.testing.expectEqual(@as(u8, @intCast(j)) +% 0xA0, m.cpu.v[j]);
+    }
+    try std.testing.expectEqual(@as(u16, 0x300), m.cpu.i);
     try std.testing.expectEqual(@as(u16, 0x202), m.cpu.pc);
 }
 
