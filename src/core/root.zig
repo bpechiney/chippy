@@ -9,6 +9,7 @@ pub const Options = @import("options.zig").Options;
 pub const Quirks = @import("quirks.zig").Quirks;
 pub const Framebuffer = @import("display.zig").Framebuffer;
 pub const TraceSink = @import("trace.zig").TraceSink;
+pub const AudioSink = @import("audio.zig").AudioSink;
 pub const disasm = @import("disasm.zig").disasm;
 pub const DisasmEntry = @import("disasm.zig").DisasmEntry;
 pub const RomError = @import("rom.zig").RomError;

@@ -3,6 +3,7 @@
 
 const Quirks = @import("quirks.zig").Quirks;
 const TraceSink = @import("trace.zig").TraceSink;
+const AudioSink = @import("audio.zig").AudioSink;
 
 pub const Options = struct {
     quirks: Quirks = Quirks.vanilla,
@@ -10,4 +11,5 @@ pub const Options = struct {
     cycles_per_second: u32 = 700,
     trace: ?TraceSink = null,
     sprite_log: ?TraceSink = null,
+    audio_sink: ?AudioSink = null,
 };

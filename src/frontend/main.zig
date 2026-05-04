@@ -69,4 +69,5 @@ fn readRom(io: Io, allocator: std.mem.Allocator, path: [:0]const u8) ![]u8 {
 test {
     _ = @import("cli.zig");
     _ = @import("render.zig");
+    _ = @import("tui.zig");
 }
