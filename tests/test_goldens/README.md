@@ -66,6 +66,62 @@ verify. Two kinds live here:
   downsampling at 12×). Cross-runner determinism via the captured
   `.bin` carries the regression load forward.
 
+## `beep_after_268_frames.bin` and `beep_audio_after_268_frames.bin`
+
+- **Source:** captured locally via `UPDATE_GOLDENS=1 zig build test` from
+  `tests/test_roms/beep.ch8` (Timendus 7-beep) under vanilla COSMAC VIP
+  `Options.quirks`, no scripted input.
+- **Sizes:**
+  - `beep_after_268_frames.bin` — 256 bytes (packed 64 × 32 framebuffer).
+  - `beep_audio_after_268_frames.bin` — 268 bytes (one byte per frame,
+    `0x00` = silent / `0x01` = beeping).
+- **Frame count `N = 268`:** chosen via plateau search at
+  `verify/verify_beep.zig` (M3-retro `verify/`-pattern + M4.2 multi-window
+  refinement). Across a 600-frame run the audio bool stream produces
+  38 plateau segments; the longest silent plateau spans frames 236–299
+  (64 frames wide), centred at 268. Per the M4.4 oscillating-framebuffer
+  plateau-pinning lesson the centre is the most robust pin point —
+  ±32 frames of cycle-count drift would still land inside the plateau.
+- **Framebuffer at `N = 268`:** the post-SOS speaker-erased state
+  (all-zero, 256 bytes of `0x00`). The speaker sprite at (28, 12) was
+  drawn during each beep and erased during each off-period via the
+  same `DXYN`; at the centre of the post-pattern silent plateau the
+  framebuffer has been all-zero for ~32 frames since iteration 9's
+  erase. Any DXYN bug that left the speaker sprite rendered would
+  fail the framebuffer assertion.
+- **Audio bool-stream plateau structure for `audio[0..268]`:**
+  - frame 0 (1 frame): silent (boot, before first FX18 fires)
+  - frames 1–9 (9 frames): BEEP — dot 1 (S)
+  - frames 10–17 (8 frames): silent
+  - frames 18–26 (9 frames): BEEP — dot 2 (S)
+  - frames 27–34 (8 frames): silent
+  - frames 35–43 (9 frames): BEEP — dot 3 (S)
+  - frames 44–66 (23 frames): silent (S → O inter-letter gap)
+  - frames 67–95 (29 frames): BEEP — dash 1 (O)
+  - frames 96–103 (8 frames): silent
+  - frames 104–132 (29 frames): BEEP — dash 2 (O)
+  - frames 133–140 (8 frames): silent
+  - frames 141–169 (29 frames): BEEP — dash 3 (O)
+  - frames 170–192 (23 frames): silent (O → S inter-letter gap)
+  - frames 193–201 (9 frames): BEEP — dot 1 (S)
+  - frames 202–209 (8 frames): silent
+  - frames 210–218 (9 frames): BEEP — dot 2 (S)
+  - frames 219–226 (8 frames): silent
+  - frames 227–235 (9 frames): BEEP — dot 3 (S, end of pattern)
+  - frames 236–267 (32 frames): silent (post-pattern; the 64-frame
+    inter-cycle gap before `jump main` restarts the pattern at frame
+    ~300)
+
+  Beep durations (9-frame dots, 29-frame dashes) are one frame shorter
+  than the FX18 V[0] values (10, 30) per the post-tick audio sampling
+  contract documented in ADR 0015 — the final tick of each beep brings
+  ST from 1 to 0, sampled as `0x00`.
+- **Why `runFrame` (not `runCycles`):** see the docstring on
+  `tests/integration/golden_beep.zig`. The ROM is timer-driven
+  (FX15/FX18 + FX07-driven wait loops) and the audio sink fires
+  post-tick from `runFrame`'s tail per ADR 0015 — `runCycles` produces
+  no ticks and no audio samples.
+
 ## `quirks.png`
 
 - **Source:** `pictures/quirks.png` from
