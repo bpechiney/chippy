@@ -31,7 +31,11 @@ _Avoid_: screen, display memory, vram
 An 8-bit register that decrements at 60 Hz down to zero. Read via `FX07`, set via `FX15`. Used by ROMs to time gameplay events.
 
 **Sound timer**:
-An 8-bit register that decrements at 60 Hz down to zero. Set via `FX18`. While non-zero, the beeper is on.
+An 8-bit register that decrements at 60 Hz down to zero. Set via `FX18`. While non-zero, the **Beeper** is on.
+
+**Beeper**:
+The COSMAC VIP's single fixed-pitch audio output device. Audible iff the **Sound timer** is non-zero; observable to ROMs only by setting `FX18` (no read path). Vanilla CHIP-8 has no pitch, waveform, or volume controls — beeper state is fully captured by one bit ("on" / "off") sampled at 60 Hz tick boundaries.
+_Avoid_: tone, audio output, sound, speaker
 
 **Keypad**:
 The 16-key hex input device. Keys are addressed `0x0`–`0xF`. ROMs poll via `EX9E` / `EXA1` and block-read via `FX0A`.

@@ -262,6 +262,16 @@ pub const Machine = struct {
         sink.write(sink.ctx, line);
     }
 
+    /// Frame-aligned post-tick audio dispatch — see ADR 0015. Sub-frame
+    /// transients (FX18 set + cleared inside the same N cycles before any
+    /// tick) are inaudible by VIP semantics and intentionally invisible.
+    /// Errors from the sink are swallowed: audio is non-essential to ROM
+    /// correctness, same fail-open discipline as emitTrace's format step.
+    fn emitAudio(self: *const Machine) void {
+        const sink = self.options.audio_sink orelse return;
+        sink.write(sink.ctx, audio.isBeeping(self.timing.sound_timer)) catch {};
+    }
+
     pub fn runCycles(self: *Machine, n: u32) Cycles {
         var ran: Cycles = 0;
         var i: u32 = 0;
@@ -278,6 +288,7 @@ pub const Machine = struct {
         const cycles_per_frame = self.options.cycles_per_second / 60;
         _ = self.runCycles(cycles_per_frame);
         self.timing.tick();
+        self.emitAudio();
     }
 
     pub fn tickTimers(self: *Machine) void {
@@ -2069,4 +2080,114 @@ test "trace writer null sink receives zero writes" {
     // Sentinel: the sink was never wired in, so the buffer is untouched.
     try std.testing.expectEqual(@as(usize, 0), sink_state.write_count);
     try std.testing.expectEqual(@as(usize, 0), sink_state.len);
+}
+
+// Test-only audio recorder mirroring `BufferSink` in shape and lifetime
+// (comptime `is_test` strip → non-test builds resolve to `void`). The buffer
+// is bool-typed because the M5.2 sink payload is a single bit; goldens compare
+// per-frame stream equality, not byte-formatted output (see ADR 0015).
+const AudioBufferSink = if (@import("builtin").is_test) struct {
+    buf: []bool,
+    count: usize = 0,
+
+    fn writeFn(ctx: *anyopaque, beeping: bool) anyerror!void {
+        const self: *AudioBufferSink = @ptrCast(@alignCast(ctx));
+        self.buf[self.count] = beeping;
+        self.count += 1;
+    }
+
+    fn sink(self: *AudioBufferSink) audio.AudioSink {
+        return .{ .write = writeFn, .ctx = self };
+    }
+} else void;
+
+test "audio sink fires once per runFrame and observes sound_timer = 0 when no FX18 has run" {
+    var seen: [3]bool = undefined;
+    var sink_state: AudioBufferSink = .{ .buf = &seen };
+    var m = Machine.init(.{ .audio_sink = sink_state.sink() });
+    defer m.deinit();
+    try m.loadRom(&assemble(.{0x1200})); // JP self — silent loop, ST stays 0.
+
+    m.runFrame();
+    m.runFrame();
+    m.runFrame();
+
+    try std.testing.expectEqual(@as(usize, 3), sink_state.count);
+    try std.testing.expectEqualSlices(bool, &.{ false, false, false }, &seen);
+}
+
+test "audio sink end-of-frame post-tick edge: ST=1 set in frame 1 records [false]" {
+    // The sink reads sound_timer *after* tickTimers, so a sound_timer that
+    // FX18 set to 1 mid-frame is observed as 0 (silent) at sink time. Pins
+    // ADR 0015's frame-aligned post-tick contract.
+    var seen: [1]bool = undefined;
+    var sink_state: AudioBufferSink = .{ .buf = &seen };
+    var m = Machine.init(.{ .audio_sink = sink_state.sink() });
+    defer m.deinit();
+    // LD V0, 1 ; LD ST, V0 ; JP self  — keeps PC stable for the rest of frame 1.
+    try m.loadRom(&assemble(.{ 0x6001, 0xF018, 0x1204 }));
+
+    m.runFrame();
+
+    try std.testing.expectEqual(@as(usize, 1), sink_state.count);
+    try std.testing.expectEqual(false, seen[0]);
+}
+
+test "audio sink null leaves runFrame state byte-identical to a non-null run" {
+    // Symmetric with the trace-sink null-cost test (ADR 0006's "zero-cost
+    // when unused" promise generalizes to AudioSink per ADR 0015).
+    const program = assemble(.{ 0x6005, 0xF018, 0x1204 });
+
+    var no_sink = Machine.init(.{});
+    defer no_sink.deinit();
+    try no_sink.loadRom(&program);
+    var i: u32 = 0;
+    while (i < 10) : (i += 1) no_sink.runFrame();
+
+    var seen: [10]bool = undefined;
+    var sink_state: AudioBufferSink = .{ .buf = &seen };
+    var with_sink = Machine.init(.{ .audio_sink = sink_state.sink() });
+    defer with_sink.deinit();
+    try with_sink.loadRom(&program);
+    i = 0;
+    while (i < 10) : (i += 1) with_sink.runFrame();
+
+    try std.testing.expectEqualSlices(u8, &no_sink.cpu.v, &with_sink.cpu.v);
+    try std.testing.expectEqual(no_sink.cpu.pc, with_sink.cpu.pc);
+    try std.testing.expectEqual(no_sink.timing.sound_timer, with_sink.timing.sound_timer);
+    try std.testing.expectEqual(no_sink.timing.delay_timer, with_sink.timing.delay_timer);
+    try std.testing.expectEqual(no_sink.timing.cycles, with_sink.timing.cycles);
+    try std.testing.expectEqualSlices(u1, &no_sink.framebuffer.pixels, &with_sink.framebuffer.pixels);
+}
+
+test "audio sink does not fire from step or runCycles — only from runFrame" {
+    // ADR 0015 ties the sink's cadence to the existing 60 Hz tick contract.
+    var seen: [4]bool = undefined;
+    var sink_state: AudioBufferSink = .{ .buf = &seen };
+    var m = Machine.init(.{ .audio_sink = sink_state.sink() });
+    defer m.deinit();
+    try m.loadRom(&assemble(.{ 0x6005, 0xF018, 0x1204 }));
+
+    _ = m.step();
+    _ = m.step();
+    try std.testing.expectEqual(@as(u8, 5), m.timing.sound_timer);
+    try std.testing.expectEqual(@as(usize, 0), sink_state.count);
+
+    _ = m.runCycles(50);
+    try std.testing.expectEqual(@as(usize, 0), sink_state.count);
+}
+
+test "audio sink records the post-tick decrement schedule across a 10-frame ST=5 run" {
+    var seen: [10]bool = undefined;
+    var sink_state: AudioBufferSink = .{ .buf = &seen };
+    var m = Machine.init(.{ .audio_sink = sink_state.sink() });
+    defer m.deinit();
+    try m.loadRom(&assemble(.{ 0x6005, 0xF018, 0x1204 }));
+
+    var i: u32 = 0;
+    while (i < 10) : (i += 1) m.runFrame();
+
+    try std.testing.expectEqual(@as(usize, 10), sink_state.count);
+    const expected = [_]bool{ true, true, true, true, false, false, false, false, false, false };
+    try std.testing.expectEqualSlices(bool, &expected, &seen);
 }
