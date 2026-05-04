@@ -53,6 +53,12 @@ pub const RunOptions = struct {
     run: RunMode,
     pre_run: ?*const fn (*Machine) void = null,
     audio_recording: ?*AudioRecording = null,
+    /// Optional audio bool-stream golden path. When set together with
+    /// `audio_recording`, the captured stream is byte-encoded (0x00/0x01
+    /// per frame) and either written (UPDATE_GOLDENS) or asserted via
+    /// `expectEqualSlices`. Failure messages localize to the audio path
+    /// vs the framebuffer path so a diverging golden is unambiguous.
+    audio_golden_path: ?[]const u8 = null,
 };
 
 pub fn runAndCompare(opts: RunOptions) !void {
@@ -82,13 +88,40 @@ pub fn runAndCompare(opts: RunOptions) !void {
 
     if (updateGoldensRequested()) {
         try cwd.writeFile(io, .{ .sub_path = opts.golden_path, .data = &actual });
+        if (opts.audio_golden_path) |audio_path| {
+            const rec = opts.audio_recording orelse return error.AudioGoldenWithoutRecording;
+            const bytes = try encodeAudioBytes(rec.slice(), std.testing.allocator);
+            defer std.testing.allocator.free(bytes);
+            try cwd.writeFile(io, .{ .sub_path = audio_path, .data = bytes });
+        }
         return;
     }
 
-    const golden = try cwd.readFileAlloc(io, opts.golden_path, std.testing.allocator, .limited(PACKED_BYTES + 1));
-    defer std.testing.allocator.free(golden);
+    try compareGoldenOrLabel(opts.rom_path, opts.golden_path, &actual, "framebuffer");
 
-    try std.testing.expectEqualSlices(u8, golden, &actual);
+    if (opts.audio_golden_path) |audio_path| {
+        const rec = opts.audio_recording orelse return error.AudioGoldenWithoutRecording;
+        const bytes = try encodeAudioBytes(rec.slice(), std.testing.allocator);
+        defer std.testing.allocator.free(bytes);
+        try compareGoldenOrLabel(opts.rom_path, audio_path, bytes, "audio bool-stream");
+    }
+}
+
+fn compareGoldenOrLabel(rom_path: []const u8, golden_path: []const u8, actual: []const u8, label: []const u8) !void {
+    const cwd = std.Io.Dir.cwd();
+    const io = std.testing.io;
+    const golden = try cwd.readFileAlloc(io, golden_path, std.testing.allocator, .limited(actual.len + 1));
+    defer std.testing.allocator.free(golden);
+    std.testing.expectEqualSlices(u8, golden, actual) catch |err| {
+        std.debug.print("\n[golden_harness] {s} mismatch: rom={s} golden={s}\n", .{ label, rom_path, golden_path });
+        return err;
+    };
+}
+
+fn encodeAudioBytes(stream: []const bool, alloc: std.mem.Allocator) ![]u8 {
+    const out = try alloc.alloc(u8, stream.len);
+    for (stream, 0..) |b, i| out[i] = if (b) 0x01 else 0x00;
+    return out;
 }
 
 // Row-major, MSB = leftmost so a hex dump of the snapshot reads like the screen.

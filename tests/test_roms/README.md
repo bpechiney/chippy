@@ -81,6 +81,39 @@ locally.
   @5000, getkey @5000 — see PR description for the full M2.11-style
   stability sweep.
 
+## `beep.ch8`
+
+- **Source:** `bin/7-beep.ch8` from
+  [Timendus/chip8-test-suite](https://github.com/Timendus/chip8-test-suite),
+  retrieved 2026-05-03. Upstream git-blob
+  `27c205f7e1cb3a52c9314e8e0227aedd559bc24b`.
+- **License:** GPL-3.0, matching this repo's own license.
+- **Underlying authorship:** Timendus's beep-test ROM (seventh bundled
+  test). Verifies the buzzer (sound timer / FX18) by emitting SOS in
+  morse code: three short beeps (10-frame ST=10), three long beeps
+  (30-frame ST=30), three short beeps, with timed silent gaps, then
+  loops. Source available as `src/tests/7-beep.8o` upstream.
+- **SHA-256:** `bb8eb25fbfb7520af47d084b9e222914c308d6eec37c10435efa732894cb41c5`
+- **Size:** 110 bytes.
+- **Behavior:** at boot, loads a 19-byte pattern table (count byte +
+  9 (beep_length, off_length) pairs) into RAM via `i := pattern; load v0`
+  (FX65 with x=0). Each iteration of the main loop draws a 7-byte speaker
+  sprite at (28, 12), sets `buzzer := v0` (FX18) and `delay := v0` (FX15)
+  to the current pattern's beep length, calls `wait-for-delay`
+  (software wait via FX07 + 4XNN + 1NNN), erases the speaker, sets
+  `delay := v1` to the off-period length, waits, then advances v2 by 2
+  to index the next pattern entry. After 9 iterations the loop falls
+  through and `jump main` restarts the whole pattern. Pattern bytes
+  encode the SOS morse: `(10, 5) ×3 → (30, 5/5/20) → (10, 5/5/60)`
+  (last gap longer to mark end-of-cycle). The `wait-for-delay`
+  subroutine also checks `if v4 key then jump manual-control` (EX9E
+  with v4=0xB) — pressing key `B` enters an interactive manual-buzzer
+  mode. Default keypad state has key B up, so the auto-beep path runs
+  unconditionally; the M5.3 keystone golden runs without scripted input.
+  Pre-flight trace at `verify/verify_beep.zig` enumerates per-window
+  opcodes hit, FX18 events + V[X] values, blocking-stall counts (DXYN
+  vBlank-wait only — no FX0A), and audio bool-stream plateau structure.
+
 ## `quirks.ch8`
 
 - **Source:** `bin/5-quirks.ch8` from
